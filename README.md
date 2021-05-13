@@ -2,16 +2,16 @@
 
 ### preprocessing notebook:
 
-https://htmlpreview.github.io/?https://github.com/meconsens/ctp/blob/main/preprocessing.html
+https://htmlpreview.github.io/?https://github.com/meconsens/rctp/blob/main/preprocessing.html
 
 ### mgp calc notebook:
 
-https://htmlpreview.github.io/?https://github.com/meconsens/ctp/blob/main/mgpCalculation.html
+https://htmlpreview.github.io/?https://github.com/meconsens/rctp/blob/main/mgpCalculation.html
 
 ### mega analysis notebook:
 
-https://htmlpreview.github.io/?https://github.com/meconsens/ctp/blob/main/megaAnalysis.html
+https://htmlpreview.github.io/?https://github.com/meconsens/rctp/blob/main/megaAnalysis.html
 
 ### ROSMAP analysis notebook:
 
-https://htmlpreview.github.io/?https://github.com/meconsens/ctp/blob/main/ROSMAPanalysis.html
+https://htmlpreview.github.io/?https://github.com/meconsens/rctp/blob/main/ROSMAPanalysis.html
