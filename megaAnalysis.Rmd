@@ -806,11 +806,11 @@ assign(paste0("mega_analysis_plot_", markers), mega_analysis_plot)
    
 ## generate the final multi-panel temporal figure using cowplot's plot_grid
 bottom_plot = plot_grid(SST_final_boxplots_subclass_MTGCgG_derived_common_final, 
-                    IT_final_boxplots_subclass_both_temp,  
+                    IT_final_boxplots_subclass_MTGCgG_derived_common_final,  
                     nrow = 2, ncol = 1, rel_widths = c(.6, .4), 
                     axis = 'l', align = 'v', labels = c('B', 'C'))
 full_plot = plot_grid(mega_analysis_plot_subclass_MTGCgG_derived_common_final, 
-                          bottom_plot_temp, nrow = 2 , 
+                          bottom_plot, nrow = 2 , 
                           rel_heights = c(1.5,2.5), labels = c('A'))
 setwd('./figures')
 saveRDS(full_plot, "figure1.rds")
