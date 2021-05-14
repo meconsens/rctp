@@ -23,10 +23,10 @@ library(cowplot)
 We've loaded in the necessary libraries for the ROSMAP specific analysis, so let's get the marker list for prefrontal regions and the rCTPs calculated on the ROSMAP dataset using this marker list and the necessary metadata associated with the cohort.
 
 ```{r}
-marker <- c("subclass_both_CgG_common_final")
+marker <- c("subclass_MTGCgG_derived_common_final")
 setwd('./commonMarkerLists')
 #get marker list
-subclass_both_CgG_common_final <-  readRDS(paste0(marker, '.rds'))
+subclass_MTGCgG_derived_common_final <-  readRDS(paste0(marker, '.rds'))
 setwd('../')
 
 #get MGP, aka the rCTPs
@@ -141,7 +141,7 @@ for(model in model_names){
 Let's calculate the association between cognitive residuals in ROSMAP and rCTPs.
 
 ```{r}
-cell_type_names  <- (names(subclass_both_CgG_common_final))
+cell_type_names  <- (names(subclass_MTGCgG_derived_common_final))
 
 pathology_names <- c("tangles_sqrt", 
                      "amyloid_sqrt", "tdp_stage4", "braaksc",
