@@ -168,7 +168,7 @@ results <- sapply(cell_type_names,function(celltype) {
   sapply(pathology_names, function(pathology) {
     
     if(pathology =="cogn_global_random_slope" |pathology =="cogn_globaln_lv" | pathology =="BASELINEcog_res"  ){
-      covars <-c("educ", "age_bl", "msex")
+      covars <-c("educ", "age_bl", "msex", "age_death", "pmi")
     }
     form <- as.formula(paste0(celltype,"~",pathology," + ",paste0(covars,collapse=" + "))) 
     if(pathology == 'LOAD'){
