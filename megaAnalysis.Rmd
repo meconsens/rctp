@@ -283,6 +283,7 @@ for(markers in marker_lists){
   
   if(str_detect(markers, "subclass")){
       mega_mgp_results <- mega_mgp_results %>% rename(subclass = celltype)
+      subclass_meta$AIBS_subclass_label <- make.names(subclass_meta$AIBS_subclass_label)
       all_beta_mega = merge(mega_mgp_results,
                       subclass_meta, by.x = 'subclass', by.y = 'AIBS_subclass_label')
       all_beta_mega$class <- as.factor(all_beta_mega$AIBS_class_label)
@@ -317,7 +318,8 @@ for(markers in marker_lists){
     facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
     geom_errorbar(aes(ymin = lb, ymax = ub), width = .33) + 
     ylab('LOAD (Beta)') + 
-    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 15),
+          strip.text.x = element_text(size = 15))+
     ggtitle(paste0("Mega Analysis Results for ", folder_name, " Marker List")) +
     geom_text(x = annotation_label_mega$subclass,  y = 0.3, 
               label = annotation_label_mega$mark, 
@@ -468,7 +470,7 @@ for(markers in marker_lists){
       saveRDS(temp, paste0("full_res_", markers, "_temp.rds"))
       assign(paste0("full_res_", markers, "_temp"), temp)
       
-      temp_sig <- full_sig_indiv%>%filter(region == "temporal")
+      temp_sig <- full_sig_indiv%%filter(region == "temporal")
       saveRDS(temp_sig, paste0("full_sig_", markers, "_temp.rds"))
       assign(paste0("full_sig_", markers, "_temp"), temp_sig)
       

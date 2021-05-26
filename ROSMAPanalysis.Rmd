@@ -200,6 +200,10 @@ results$bonfp <- p.adjust(results$p, method="bonferroni")
 results$fdr <- p.adjust(results$p, method="fdr")
 results$signedFDR <- -log10(results$fdr) *(sign(results$beta))
 
+setwd('./ROSMAP_spec')
+saveRDS(results, "ROS_results.rds")
+setwd('../')
+
 ```
 Let's plot.
 
@@ -254,6 +258,8 @@ model_data <- arrange(model_data, model)
 
 model_data$range <- model_data$r2 - model_data$r2[length(model_data$r2)]
 model_data$percent <- as.numeric(format(round(model_data$range*100, 2), nsmall = 2))
+#remove APOE2D info
+model_data <- model_data[-c(3, 5, 8),]
 
 model_plot = model_data %>% 
   ggplot(aes(x = model, y = percent ,fill = "#E6E6FA")) + 
