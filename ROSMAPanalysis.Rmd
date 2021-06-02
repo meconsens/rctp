@@ -246,8 +246,8 @@ heatmap <- ggplot(results, aes(celltype, pathology, fill= signedFDR))+
   theme_minimal() + geom_tile() + 
   facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
   scale_fill_gradient2(low="darkblue", high="darkgreen", guide="colorbar") + 
-  geom_text(data=subset(sig_res), aes(label=formatC(fdr, format = "e", digits = 2), label.size=0.1), color ="white") +
-  theme_minimal() +                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+  geom_text(data=subset(sig_res), aes(label="**"), color ="white") +
+  theme_minimal() +    
   theme(axis.title.y=element_blank(),
         axis.title.x=element_blank(),
         axis.ticks.y=element_blank(),
@@ -537,7 +537,7 @@ heatmap <- ggplot(results, aes(celltype, pathology, fill= signedFDR))+
   theme_minimal() + geom_tile() + 
   facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
   scale_fill_gradient2(low="darkblue", high="darkgreen", guide="colorbar") + 
-  geom_text(data=subset(sig_res,fdr<0.05), aes(label=format(round(fdr*100, 2))), color ="white") +
+  geom_text(data=subset(sig_res), aes(label="**"), color ="white") +
   theme_minimal() +
   theme(axis.title.y=element_blank(),
         axis.title.x=element_blank(),
@@ -600,7 +600,7 @@ mid_plots = plot_grid(SST_cogn, SST_amyloid,
                      IT_amyloid, IT_tangles,  nrow = 2, ncol = 3,
                      axis = 'l', align = 'v', labels = c('B', 'C', 'D', 'E', 'F', 'G')) 
 
-full_plot = plot_grid(heatmap, mid_plots, model_data_noSST, nrow = 3 , rel_heights = c(5,4, 5), 
+full_plot = plot_grid(heatmap, mid_plots, model_plot, nrow = 3 , rel_heights = c(5,4, 5), 
                      labels = c('A', '', 'H'))
 
 setwd('./figures')
