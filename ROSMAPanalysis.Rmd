@@ -240,14 +240,14 @@ results$pathology <- factor(results$pathology, levels = c("amyloid_sqrt", "tangl
                                                           "BASELINEcog_res"))
 
 results <- arrange(results, class)
-
+sig_res <- subset(results,fdr<0.05)
 
 heatmap <- ggplot(results, aes(celltype, pathology, fill= signedFDR))+
   theme_minimal() + geom_tile() + 
   facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
   scale_fill_gradient2(low="darkblue", high="darkgreen", guide="colorbar") + 
-  geom_text(data=subset(results,bonfp<0.05), aes(label="*"), color ="white") +
-  theme_minimal() +
+  geom_text(data=subset(sig_res), aes(label=formatC(fdr, format = "e", digits = 2), label.size=0.1), color ="white") +
+  theme_minimal() +                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
   theme(axis.title.y=element_blank(),
         axis.title.x=element_blank(),
         axis.ticks.y=element_blank(),
@@ -531,12 +531,13 @@ results$pathology <- factor(results$pathology, levels = c("amyloid_sqrt", "tangl
 
 results <- arrange(results, class)
 
+sig_res <- subset(results,fdr<0.05)
 
 heatmap <- ggplot(results, aes(celltype, pathology, fill= signedFDR))+
   theme_minimal() + geom_tile() + 
   facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
   scale_fill_gradient2(low="darkblue", high="darkgreen", guide="colorbar") + 
-  geom_text(data=subset(results,fdr<0.05), aes(label=results$signedFDR), color ="white") +
+  geom_text(data=subset(sig_res,fdr<0.05), aes(label=format(round(fdr*100, 2))), color ="white") +
   theme_minimal() +
   theme(axis.title.y=element_blank(),
         axis.title.x=element_blank(),
