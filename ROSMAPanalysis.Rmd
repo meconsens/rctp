@@ -19,7 +19,22 @@ library(grid)
 library(gridExtra)
 library(cowplot)
 ```
+Let's get the genotype SNP data associated with the ROSMAP individuals, specifically for the TMEM106B SNP.
+```{r}
+setwd('./cohortMetadata')
+#get marker list
+SNP_data <-  read.table("TMEM106B_ROSMAP.txt", sep = " ", fill = TRUE )
+setwd('../')
 
+
+SNP_data <- t(SNP_data)
+SNP_HET <- data.frame("gwas_id" = SNP_data[-c(1:4), -2], "TMEM106B" = as.factor("HET"))
+                     
+SNP_HOM <- data.frame("gwas_id" = SNP_data[-c(1:4), -1], "TMEM106B" = as.factor ("HOM"))
+SNP_HOM <-SNP_HOM[!(is.na(SNP_HOM$gwas_id) | SNP_HOM$gwas_id==""), ]
+
+SNP_meta <- rbind(SNP_HET, SNP_HOM)
+```
 We've loaded in the necessary libraries for the ROSMAP specific analysis, so let's get the marker list for prefrontal regions and the rCTPs calculated on the ROSMAP dataset using this marker list and the necessary metadata associated with the cohort.
 
 ```{r}
@@ -43,6 +58,11 @@ ROS_meta <- readRDS("ROSmasterCOMPLETE.rds")
 ROSID <- read.csv(file = 'ROSMAP_IDkey.csv', stringsAsFactors = F) 
 setwd('../')
 
+#add in SNP data to metadata
+#ROSID_SNP <- merge(ROSID, SNP_meta, by = "gwas_id")
+#ROSID_SNP <- ROSID_SNP[, c("projid","gwas_id", "TMEM106B")]
+#ROS_meta <- merge(ROS_meta,ROSID_SNP, by = "projid")
+
 #get cognitive scores at last visit 
 last_cog_scores <- filter(ROS_meta, !is.na(cogn_globaln_lv))
 last_cog_scores <- last_cog_scores %>% select("projid", "cogn_globaln_lv" )
@@ -55,10 +75,13 @@ pathology_names <- c("msex", "pmi", "age_death", "tangles_sqrt",
                      "cvda_4gp2", "caa_4gp", "hspath_typ", "educ",
                      "apoe4d", "apoe2d")
 
+#,"TMEM106B")
+
 pathology_vars <- ROS_meta %>% select("projid", all_of(pathology_names))
 pathology_vars <- na.omit(pathology_vars)
 
 combined_data <- inner_join(last_cog_scores, pathology_vars)
+combined_data <- unique(combined_data)
 
 
 conversion <- data.frame("subject" = ROSID$projid, "projid" = ROSID$rnaseq_id)
@@ -71,7 +94,8 @@ Now we've got a dataframe of our subjects along with their values for all the pa
 
 ```{r}
 mod_info <- merge(combined_data, relevant_merge, by="projid")
-model_names <- c("BASELINE", "APOE4D","APOE2D", "IT", "APOE4D.IT", "APOE2D.IT", "SST", "APOE4D.SST", "IT.SST","APOE2D.SST" )
+mod_info <- unique(mod_info)
+model_names <- c("BASELINE", "APOE4D","APOE2D", "IT", "APOE4D.IT", "APOE2D.IT", "SST", "APOE4D.SST", "IT.SST","APOE2D.SST")
 
 for(model in model_names){
   base_vars <- c("msex", "pmi", "age_death", "tangles_sqrt", 
@@ -158,6 +182,7 @@ pathology_names <- c("tangles_sqrt",
 
 
 covars <- c("msex","age_death","pmi")
+#, "TMEM106B")
 
 
 new_relevant_merge <- merged[, c("projid", cell_type_names )]
@@ -165,9 +190,9 @@ cell_type_names <- make.names(cell_type_names)
 colnames(new_relevant_merge) <- c("projid", cell_type_names)
 
 
-new_mod_info <- merge(combined_data, new_relevant_merge, by="projid")
+new_mod_info <- merge(unique(combined_data), new_relevant_merge, by="projid")
 new_mod_info <- merge(new_mod_info, ROS_meta)
-new_mod_info$BASELINEcog_res <- mod_info$BASELINEcog_res
+new_mod_info <- merge(unique(new_mod_info), mod_info)
 model.data <- new_mod_info
 
 
@@ -358,13 +383,14 @@ pathology_vars <- ROS_meta %>% select("projid", all_of(pathology_names))
 pathology_vars <- na.omit(pathology_vars)
 
 combined_data <- inner_join(last_cog_scores, pathology_vars)
-
+combined_data <- unique(combined_data)
 
 conversion <- data.frame("subject" = ROSID$projid, "projid" = ROSID$rnaseq_id)
 merged <- merge(conversion, ROSMGP, by="projid")
 merged <- setnames(merged, old = c('projid','subject'), new = c('subject','projid'))
 relevant_merge <- data.frame("projid"= merged$projid, "SST" = merged$SST, "IT"= merged$IT)
 mod_info <- merge(combined_data, relevant_merge, by="projid")
+mod_info <- unique(mod_info)
 model_names <- c("BASELINE", "APOE4D","APOE2D", "IT", "APOE4D.IT", "APOE2D.IT", "SST", "APOE4D.SST", "IT.SST","APOE2D.SST" )
 
 for(model in model_names){
