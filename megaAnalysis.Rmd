@@ -30,7 +30,7 @@ library(cowplot)
 Now that we've loaded in the libraries lets get the marker lists we need.
 
 ```{r}
-marker_lists <- c("subclass_MTGCgG_derived_no_SST","subclass_MTGCgG_derived_common_final","in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final", "subclass_both_CgG_common_final", "subclass_both_MTG_common_final", "lake", "darmanis")
+marker_lists <- c("subclass_new_no_SST", "subclass_new_common_final","subclass_MTGCgG_derived_no_SST","subclass_MTGCgG_derived_common_final","in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final", "subclass_both_CgG_common_final", "subclass_both_MTG_common_final", "lake", "darmanis")
 for(marker in marker_lists){
   print(marker)
   if(marker != "lake" && marker != "darmanis"){
@@ -53,7 +53,7 @@ As of now we've been using unique identifiers in the Mount Sinai cohorts for eac
 
 ```{r}
 cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
-marker_lists <- c("subclass_MTGCgG_derived_no_SST","subclass_MTGCgG_derived_common_final","in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final","subclass_both", "lake", "darmanis")
+marker_lists <- c("subclass_new_no_SST", "subclass_new_common_final", "subclass_MTGCgG_derived_no_SST","subclass_MTGCgG_derived_common_final","in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final","subclass_both", "lake", "darmanis")
 setwd('./rawCohortData')
 BMidsAcross <- readRDS("allMSBBIDs.rds")
 setwd('../')
@@ -144,7 +144,7 @@ Now we have all the dataframes we need for the mega-analysis. Let's do it.
 It's important to note that the "In8" celltype describe in the "lake" marker gene set is defined using only one gene "NMU", which is not enough for the MGP method to calculate a cell-type. Thus all it's values are N/A. We will therefore exclude it in the mega-analysis as the "In8" cell-type cannot be determined.
 
 ```{r}
-marker_lists <- c("subclass_MTGCgG_derived_no_SST","subclass_MTGCgG_derived_common_final", "in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final","subclass_both", "subclass_both_pre", "subclass_both_temp", "lake", "darmanis")
+marker_lists <- c("subclass_new_no_SST", "subclass_new_common_final", "subclass_MTGCgG_derived_no_SST","subclass_MTGCgG_derived_common_final", "in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final","subclass_both", "subclass_both_pre", "subclass_both_temp", "lake", "darmanis")
     
 for(markers in marker_lists){
   print(markers)
@@ -264,7 +264,7 @@ for(markers in marker_lists){
 We've calculated the significance of the association between each of the cell-types and the AD diagnosis variable (LOAD) in a mega-analyis. We can now plot the results.
 
 ```{r}
-marker_lists <- c("subclass_MTGCgG_derived_no_SST","subclass_MTGCgG_derived_common_final", "in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final","subclass_both", "subclass_both_pre", "subclass_both_temp", "lake", "darmanis")
+marker_lists <- c("subclass_new_no_SST", "subclass_new_common_final", "subclass_MTGCgG_derived_no_SST","subclass_MTGCgG_derived_common_final", "in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final","subclass_both", "subclass_both_pre", "subclass_both_temp", "lake", "darmanis")
 setwd('./subclassMeta')
 subclass_meta <- read.csv('subclass_meta.txt')
 setwd('../')
@@ -281,7 +281,7 @@ for(markers in marker_lists){
   
   
   
-  if(str_detect(markers, "subclass")){
+  if(!(str_detect(markers, "subclass_new")) && str_detect(markers, "subclass")){
       mega_mgp_results <- mega_mgp_results %>% rename(subclass = celltype)
       subclass_meta$AIBS_subclass_label <- make.names(subclass_meta$AIBS_subclass_label)
       all_beta_mega = merge(mega_mgp_results,
@@ -309,7 +309,7 @@ for(markers in marker_lists){
   
   
   my_colours = c('blue', 'grey', 'red', 'green', 'yellow', 'purple') 
-  if(str_detect(markers, "subclass")){
+  if(!(str_detect(markers, "subclass_new")) && str_detect(markers, "subclass")){
     mega_analysis_plot = all_beta_mega %>% 
     ggplot(aes(x = subclass, y = beta,fill = AIBS_class_color)) + 
     geom_hline(yintercept = 0) + 
@@ -351,7 +351,8 @@ for(markers in marker_lists){
 Let's create case/control box plots for SST and IT rCTP residuals so we can see if there's a difference in cell type proportion changes across cohorts/brain regions.
 ```{r}
 cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
-marker_lists <- c("subclass_MTGCgG_derived_common_final","in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final","subclass_both", "lake", "darmanis")
+marker_lists <- c("subclass_new_no_SST", "subclass_new_common_final","subclass_MTGCgG_derived_common_final","in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final","subclass_both", "lake", "darmanis")
+
     
 for(markers in marker_lists){
   print(markers)
@@ -481,7 +482,7 @@ for(markers in marker_lists){
 
 Let's plot the case control boxplots now that we've calculated the residuals.
 ```{r}
-marker_lists <- c("subclass_MTGCgG_derived_common_final", "in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final","subclass_both", "subclass_both_pre", "subclass_both_temp", "lake", "darmanis")
+marker_lists <- c("subclass_new_no_SST", "subclass_new_common_final","subclass_MTGCgG_derived_common_final", "in_ex_CgG_common_final","subclass_CgG_common_final", "subclass_MTG_common_final","subclass_both", "subclass_both_pre", "subclass_both_temp", "lake", "darmanis")
 for(markers in marker_lists){
   print(markers)
   folder_name <- gsub('_common_final', '', markers)
