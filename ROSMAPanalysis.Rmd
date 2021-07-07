@@ -18,112 +18,78 @@ library(ggrepel)
 library(grid)
 library(gridExtra)
 library(cowplot)
+library(tidyverse)
+library(ggbeeswarm)
+library("org.Hs.eg.db")
+library(markerGeneProfile)
 ```
-Let's get the genotype SNP data associated with the ROSMAP individuals, specifically for the TMEM106B SNP.
+Let's get the maximum amount of subjects we have in ROSMAP and calculate their MGPs using our markers. 
+
 ```{r}
-setwd('./cohortMetadata')
-#get marker list
-SNP_data <-  read.table("TMEM106B_ROSMAP.txt", sep = " ", fill = TRUE )
+mgpCalc<-function(count_df, markers){
+  # calculate MGPs per sample
+  estimations_human_markers<- mgpEstimate(exprData=count_df,
+                                          genes=markers,
+                                          geneColName="Gene",
+                                          outlierSampleRemove=F, # should outlier samples removed. This is done using boxplot stats.
+                                          geneTransform = NULL,
+                                          #function(x){homologene::mouse2human(x)$humanGene}, # this is the default option for geneTransform
+                                          groups=NULL, #if there are experimental groups provide them here. if not desired set to NULL
+                                          seekConsensus = FALSE, # ensures gene rotations are positive in both of the groups
+                                          removeMinority = TRUE)
+  mgp_info <- list("mgp_df"= count_df, "estimations_human_markers" = estimations_human_markers)
+  estimations_human_markers <- mgp_info$estimations_human_markers
+  
+  # matrix of mgp estimates per cell type, column name SST stores SST MGPs
+  mgp_est <- estimations_human_markers$estimates %>% as.data.frame() 
+  colnames(mgp_est) <- names(markers)
+  mgp_est <- mgp_est %>% tibble::rownames_to_column(var = 'projid')
+  return(mgp_est)
+}
+
+
+#get counts
+setwd('./finalCountMatrices')
+ROS_df <- readRDS("adjusted_counts.rds")
 setwd('../')
 
-
-SNP_data <- t(SNP_data)
-SNP_HET <- data.frame("gwas_id" = SNP_data[-c(1:4), -2], "TMEM106B" = as.factor("HET"))
-                     
-SNP_HOM <- data.frame("gwas_id" = SNP_data[-c(1:4), -1], "TMEM106B" = as.factor ("HOM"))
-SNP_HOM <-SNP_HOM[!(is.na(SNP_HOM$gwas_id) | SNP_HOM$gwas_id==""), ]
-
-SNP_meta <- rbind(SNP_HET, SNP_HOM)
-```
-Let's plot some box-plots for TMEM106B heterozygosity vs. homozygosity.
-```{r}
-#get the metadata
+#get metadata
 setwd('./cohortMetadata')
 ROS_meta <- readRDS("ROSmasterCOMPLETE.rds")
-#get the key to convert the subject ids to the ones associated with more metadata
-ROSID <- read.csv(file = 'ROSMAP_IDkey.csv', stringsAsFactors = F) 
 setwd('../')
 
-#add in SNP data to metadata
-ROSID_SNP <- merge(ROSID, SNP_meta, by = "gwas_id")
-ROSID_SNP <- ROSID_SNP[, c("projid","gwas_id", "TMEM106B")]
-ROS_meta <- merge(ROS_meta,ROSID_SNP, by = "projid")
-ROS_meta <- setnames(ROS_meta, old = c('projid'), new = c('subject'))
-
-#get MGP, aka the rCTPs
-mgp_name <-"mgp_ROSMAP"
-setwd('./mgpResults_subclass_MTGCgG_derived')
-ROS_mgp <- readRDS(paste0(mgp_name, ".rds"))
-ROSMGP <- ROS_mgp$model
-setwd('../')
-
-conversion <- data.frame("subject" = ROSID$projid, "projid" = ROSID$rnaseq_id)
-merged <- setnames(merged, old = c('projid','subject'), new = c('subject','projid'))
-merged <- merge(conversion, ROSMGP, by="projid")
-
-boxplot_data <- unique(merge(merged, ROS_meta, by = "subject"))
-
-boxplot_SST <- boxplot_data %>% 
-    ggplot(aes(x = TMEM106B, y = SST)) + theme_minimal()+
-    #geom_violin(alpha=0.4) + 
-    geom_quasirandom(size=0.6,shape=19,aes(col=TMEM106B),alpha=0.8) +
-    stat_summary(fun=mean,geom="point",aes(fill=TMEM106B),size=4,shape=23,col="black")+
-    scale_fill_brewer(palette="Set1")+
-    scale_color_brewer(palette="Set1")+
-    ggtitle('SST rCTPs association with \n TMEM106B heterozygosity vs. homozygosity')+
-    ylab(' SST rCTP') + 
-    xlab('') 
-
-boxplot_IT <- boxplot_data %>% 
-    ggplot(aes(x = TMEM106B, y = IT)) + theme_minimal()+
-    #geom_violin(alpha=0.4) + 
-    geom_quasirandom(size=0.6,shape=19,aes(col=TMEM106B),alpha=0.8) +
-    stat_summary(fun=mean,geom="point",aes(fill=TMEM106B),size=4,shape=23,col="black")+
-    scale_fill_brewer(palette="Set1")+
-    scale_color_brewer(palette="Set1")+
-    ggtitle('IT rCTPs association with \n TMEM106B heterozygosity vs. homozygosity')+
-    ylab( ' IT rCTP') + 
-    xlab('')  
-
-print(boxplot_IT)
-print(boxplot_SST)
-
-#TMEM106B 0,1,2 categorical variable 3 possible variables homozgyous recessive, heterozygous, homozygous dominant, plot the volcano plots cell type proportions with covariance for TMEM106B
-
-```
-
-
-We've loaded in the necessary libraries for the ROSMAP specific analysis, so let's get the marker list for prefrontal regions and the rCTPs calculated on the ROSMAP dataset using this marker list and the necessary metadata associated with the cohort.
-
-```{r}
-marker <- c("subclass_MTGCgG_derived_common_final")
+#get marker name
+marker <- c("subclass_FINAL_common_final")
 setwd('./commonMarkerLists')
 #get marker list
-subclass_MTGCgG_derived_common_final <-  readRDS(paste0(marker, '.rds'))
+subclass_FINAL_common_final <-  readRDS(paste0(marker, '.rds'))
 setwd('../')
 
-#get MGP, aka the rCTPs
-mgp_name <-"mgp_ROSMAP"
-setwd('./mgpResults_subclass_MTGCgG_derived')
-ROS_mgp <- readRDS(paste0(mgp_name, ".rds"))
-ROSMGP <- ROS_mgp$model
-setwd('../')
 
-#get the metadata
-setwd('./cohortMetadata')
-ROS_meta <- readRDS("ROSmasterCOMPLETE.rds")
-#get the key to convert the subject ids to the ones associated with more metadata
-ROSID <- read.csv(file = 'ROSMAP_IDkey.csv', stringsAsFactors = F) 
-setwd('../')
 
-#add in SNP data to metadata
-#ROSID_SNP <- merge(ROSID, SNP_meta, by = "gwas_id")
-#ROSID_SNP <- ROSID_SNP[, c("projid","gwas_id", "TMEM106B")]
-#ROS_meta <- merge(ROS_meta,ROSID_SNP, by = "projid")
+#turn the RDS ROS_df object into HUGO symbols from ENSEMBL
+symbols <- mapIds(org.Hs.eg.db, keys = ROS_df$gene_ID, keytype = "ENSEMBL", column="SYMBOL")
+symbols_df <- as.data.frame(symbols)
+symbols_df <- rownames_to_column(symbols_df, "gene_ID")
 
-#get cognitive scores at last visit 
+final_df <- merge(ROS_df, symbols_df)
+new_gene <- final_df$symbols %>% make.names(unique = T) #this is ONE way of dealing with the duplicates, just making them into separate, unique names
+final_df$new_gene <- new_gene
+n_col <- ncol(ROS_df)
+mgp_df <- final_df[,c(n_col+2,2:n_col)]
+colnames(mgp_df)[1] <- "Gene"
+
+#calculate mgps
+mgps_ROSMAP <- mgpCalc(count_df=mgp_df,markers= subclass_FINAL_common_final)
+
+
+#remove X from subject name
+mgps_ROSMAP$projid <- gsub('X', '', mgps_ROSMAP$projid, fixed=TRUE)
+
+
+#get the necessary variables
 last_cog_scores <- filter(ROS_meta, !is.na(cogn_globaln_lv))
-last_cog_scores <- last_cog_scores %>% select("projid", "cogn_globaln_lv" )
+last_cog_scores <- last_cog_scores %>% dplyr::select("projid", "cogn_globaln_lv" )
 last_cog_scores <- na.omit(last_cog_scores)
 
 #select the following pathologies for calculating cognitive residuals
@@ -135,25 +101,23 @@ pathology_names <- c("msex", "pmi", "age_death", "tangles_sqrt",
 
 #,"TMEM106B")
 
-pathology_vars <- ROS_meta %>% select("projid", all_of(pathology_names))
+pathology_vars <- ROS_meta %>% dplyr::select("projid", all_of(pathology_names))
 pathology_vars <- na.omit(pathology_vars)
 
 combined_data <- inner_join(last_cog_scores, pathology_vars)
 combined_data <- unique(combined_data)
 
-
-conversion <- data.frame("subject" = ROSID$projid, "projid" = ROSID$rnaseq_id)
-merged <- merge(conversion, ROSMGP, by="projid")
-merged <- setnames(merged, old = c('projid','subject'), new = c('subject','projid'))
-relevant_merge <- data.frame("projid"= merged$projid, "SST" = merged$SST, "IT"= merged$IT)
+relevant_merge <- data.frame("projid"= mgps_ROSMAP$projid, "SST" = mgps_ROSMAP$SST, "L3.5.IT"= mgps_ROSMAP$L3.5.IT)
 ```
+
+
 
 Now we've got a dataframe of our subjects along with their values for all the pathology variables relevant for calculating cognitive residuals. It's time to calculate the cognitive residuals.
 
 ```{r}
 mod_info <- merge(combined_data, relevant_merge, by="projid")
 mod_info <- unique(mod_info)
-model_names <- c("BASELINE", "APOE4D","APOE2D", "IT", "APOE4D.IT", "APOE2D.IT", "SST", "APOE4D.SST", "IT.SST","APOE2D.SST")
+model_names <- c("BASELINE", "APOE4D","APOE2D", "L3.5.IT", "APOE4D.L3.5.IT", "APOE2D.L3.5.IT", "SST", "APOE4D.SST", "L3.5.IT.SST","APOE2D.SST")
 
 for(model in model_names){
   base_vars <- c("msex", "pmi", "age_death", "tangles_sqrt", 
@@ -173,16 +137,17 @@ for(model in model_names){
     form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe2d"), sep="",collapse=" + ")," )",sep="")
     
   }
-  else if (model == "IT"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars,"IT"), sep="",collapse=" + ")," )",sep="")
+  else if (model == "L3.5.IT"){
+    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",
+                  paste(append(base_vars,"L3.5.IT"), sep="",collapse=" + ")," )",sep="")
     
   }
-  else if (model == "APOE4D.IT"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe4d + IT"), sep="",collapse=" + ")," )",sep="")
+  else if (model == "APOE4D.L3.5.IT"){
+    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe4d + L3.5.IT"), sep="",collapse=" + ")," )",sep="")
     
   }
-  else if (model == "APOE2D.IT"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars,"apoe2d + IT"), sep="",collapse=" + ")," )",sep="")
+  else if (model == "APOE2D.L3.5.IT"){
+    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars,"apoe2d + L3.5.IT"), sep="",collapse=" + ")," )",sep="")
     
   }
   else if (model == "SST"){
@@ -193,8 +158,8 @@ for(model in model_names){
     form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe4d + SST"), sep="",collapse=" + ")," )",sep="")
     
   }
-  else if (model == "IT.SST"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "IT + SST"), sep="",collapse=" + ")," )",sep="")
+  else if (model == "L3.5.IT.SST"){
+    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "L3.5.IT + SST"), sep="",collapse=" + ")," )",sep="")
     
   }
   else{
@@ -230,7 +195,7 @@ model_data$significant_bonf <- ifelse(model_data$bonf < 0.05, "***", "")
 Let's calculate the association between cognitive residuals in ROSMAP and rCTPs.
 
 ```{r}
-cell_type_names  <- (names(subclass_MTGCgG_derived_common_final))
+cell_type_names  <- (names(subclass_FINAL_common_final))
 
 pathology_names <- c("tangles_sqrt", 
                      "amyloid_sqrt", "tdp_stage4", "braaksc",
@@ -243,7 +208,7 @@ covars <- c("msex","age_death","pmi")
 #, "TMEM106B")
 
 
-new_relevant_merge <- merged[, c("projid", cell_type_names )]
+new_relevant_merge <- mgps_ROSMAP[, c("projid", cell_type_names )]
 cell_type_names <- make.names(cell_type_names)
 colnames(new_relevant_merge) <- c("projid", cell_type_names)
 
@@ -302,15 +267,15 @@ Let's plot.
 setwd('./subclassMeta')
 subclass_meta <- read.csv('subclass_meta.txt')
 setwd('../')
-subclass_meta$celltype <- make.names(subclass_meta$AIBS_subclass_label)
+#subclass_meta$celltype <- make.names(subclass_meta$AIBS_subclass_label)
 
-results <- merge(subclass_meta, results)
+#results <- merge(subclass_meta, results)
 
-results$class <- as.factor(results$AIBS_class_label)
-results$class <- factor(results$AIBS_class_label, levels = c("GABAergic", "Glutamatergic", 
-                                                             "Non-neuronal"))
+#results$class <- as.factor(results$AIBS_class_label)
+#results$class <- factor(results$AIBS_class_label, levels = c("GABAergic", "Glutamatergic", 
+                                                             #"Non-neuronal"))
 
-results <- arrange(results, class)
+#results <- arrange(results, class)
 
 results$pathology <- as.factor(results$pathology)
 results$pathology <- factor(results$pathology, levels = c("amyloid_sqrt", "tangles_sqrt", 
@@ -322,12 +287,12 @@ results$pathology <- factor(results$pathology, levels = c("amyloid_sqrt", "tangl
                                                           "cogn_global_random_slope",
                                                           "BASELINEcog_res"))
 
-results <- arrange(results, class)
+#results <- arrange(results, class)
 sig_res <- subset(results,fdr<0.05)
 
 heatmap <- ggplot(results, aes(celltype, pathology, fill= signedFDR))+
   theme_minimal() + geom_tile() + 
-  facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
+  #facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
   scale_fill_gradient2(low="darkblue", high="darkgreen", guide="colorbar") + 
   geom_text(data=subset(sig_res), aes(label="**"), color ="white") +
   theme_minimal() +    
@@ -338,19 +303,20 @@ heatmap <- ggplot(results, aes(celltype, pathology, fill= signedFDR))+
         axis.ticks.x=element_blank()) 
 
 model_data$model <- gsub(".", '+', model_data$model, fixed = T)
+model_data$model <- gsub("L3+5+IT", 'L3.5.IT', model_data$model, fixed = T)
 
 model_data$model <- factor(model_data$model, levels = rev(c("BASELINE", "APOE4D", 
-                                                          "APOE2D", "IT",
-                                                          "APOE4D+IT","APOE2D+IT","SST",
+                                                          "APOE2D", "L3.5.IT",
+                                                          "APOE4D+L3.5.IT",
+                                                          "APOE2D+L3.5.IT","SST",
                                                           "APOE2D+SST",
-                                                          "APOE4D+SST", "IT+SST")))
+                                                          "APOE4D+SST", "L3.5.IT+SST")))
 model_data <- arrange(model_data, model)
 
 model_data$range <- model_data$r2 - model_data$r2[length(model_data$r2)]
 model_data$percent <- as.numeric(format(round(model_data$range*100, 2), nsmall = 2))
 model_data$raw_percent <- as.numeric(format(round(model_data$r2*100, 2), nsmall = 2))
-#remove APOE2D info
-model_data <- model_data[-c(3, 5, 8),]
+
 
 model_plot = model_data %>% 
   ggplot(aes(x = model, y = percent ,fill = "#E6E6FA")) + 
@@ -374,19 +340,19 @@ SST_cogn <- ggplot(data=model.data, aes(y=cogn_globaln_lv, x=SST)) + theme_minim
 SST_tangles <- ggplot(data=model.data, aes(y=tangles_sqrt, x=SST)) + theme_minimal()+ geom_point() +
   geom_smooth(method=lm, se =F)  
 
-IT_cogn <- ggplot(data=model.data, aes(y=cogn_globaln_lv, x=IT)) + theme_minimal()+ geom_point() +
+L3.5.IT_cogn <- ggplot(data=model.data, aes(y=cogn_globaln_lv, x=L3.5.IT)) + theme_minimal()+ geom_point() +
   geom_smooth(method=lm, se =F)  
 
 
-IT_tangles <- ggplot(data=model.data, aes(y=tangles_sqrt, x=IT)) + theme_minimal()+ geom_point() +
+L3.5.IT_tangles <- ggplot(data=model.data, aes(y=tangles_sqrt, x=L3.5.IT)) + theme_minimal()+ geom_point() +
   geom_smooth(method=lm, se =F)  
 
-IT_amyloid <- ggplot(data=model.data, aes(y=amyloid_sqrt, x=IT)) + theme_minimal()+ geom_point() +
+L3.5.IT_amyloid <- ggplot(data=model.data, aes(y=amyloid_sqrt, x=L3.5.IT)) + theme_minimal()+ geom_point() +
   geom_smooth(method=lm, se =F) 
 
 mid_plots = plot_grid(SST_cogn, SST_amyloid, 
-                     SST_tangles,IT_cogn,
-                     IT_amyloid, IT_tangles,  nrow = 2, ncol = 3,
+                     SST_tangles,L3.5.IT_cogn,
+                     L3.5.IT_amyloid, L3.5.IT_tangles,  nrow = 2, ncol = 3,
                      axis = 'l', align = 'v', labels = c('B', 'C', 'D', 'E', 'F', 'G')) 
 
 full_plot = plot_grid(heatmap, mid_plots, model_plot, nrow = 3 , rel_heights = c(5,4, 5), 
@@ -403,31 +369,112 @@ setwd('../')
 
 print(full_plot)
 ```
+
+Okay we want to visualize the L3.5.IT rCTPs and cognitive decline in a very simple graph.
+```{r}
+
+x_mid <- mean(c(max(model.data$BASELINEcog_res, na.rm = TRUE), 
+                min(model.data$BASELINEcog_res, na.rm = TRUE)))
+
+y_mid <- mean(c(max(model.data$L3.5.IT, na.rm = TRUE), 
+                min(model.data$L3.5.IT, na.rm = TRUE)))
+
+model.data %>% 
+  mutate(quadrant = case_when(BASELINEcog_res > x_mid & L3.5.IT > y_mid   ~ "High Cognitive Residual Score and High L3.5.IT rCTPs",
+                              BASELINEcog_res <= x_mid & L3.5.IT > y_mid  ~ "Low Cognitive Residual Score and High L3.5.IT rCTPs",
+                              BASELINEcog_res <= x_mid & L3.5.IT <= y_mid ~ "Low Cognitive Residual Score and Low L3.5.IT rCTPs",
+                              TRUE                                         ~ "High Cognitive Residual Score and Low L3.5.IT rCTPs")) %>% 
+  ggplot(aes(x = BASELINEcog_res, y = L3.5.IT, color = quadrant)) +
+  geom_vline(xintercept = x_mid) + # plot vertical line
+  geom_hline(yintercept = y_mid) + # plot horizontal line
+  geom_point()
+```
+Let's try binning the L3.5.IT rCTPs and visualizing boxplots
+```{r}
+
+
+quantile_IT<- transform(model.data, Q = cut(model.data$L3.5.IT, 
+                              breaks = quantile(model.data$L3.5.IT, seq(0, 1, .2)), 
+                              labels = c(1, 2, 3, 4, 5) ,
+                              include.lowest=TRUE))
+
+quantile_IT$Q = as.character(quantile_IT$Q)
+
+quantile_IT %>% 
+  ggplot(aes(x = Q, y = cogn_globaln_lv, fill=Q)) + theme_minimal()+
+  geom_boxplot(aes(group=Q), outlier.shape = NA) + 
+  geom_quasirandom() + 
+  ylab('Cognitive Score at Last Visit') + 
+  xlab('L3.5.IT Cell-Type Proportion Quintiles')  +
+  scale_fill_brewer(palette="BuPu")
+
+```
+
 Let's see what results we get when we remove the SST gene from the marker list defining SST cell-type proportions.
 ```{r}
-marker <- c("subclass_MTGCgG_derived_no_SST")
+marker <- c("subclass_FINAL_common_final_noSST")
 setwd('./commonMarkerLists')
 #get marker list
-subclass_MTGCgG_derived_no_SST <-  readRDS(paste0(marker, '.rds'))
+subclass_FINAL_noSST <-  readRDS(paste0(marker, '.rds'))
 setwd('../')
 
-#get MGP, aka the rCTPs
-mgp_name <-"mgp_ROSMAP"
-setwd('./mgpResults_subclass_MTGCgG_derived_no_SST')
-ROS_mgp <- readRDS(paste0(mgp_name, ".rds"))
-ROSMGP <- ROS_mgp$model
+mgpCalc<-function(count_df, markers){
+  # calculate MGPs per sample
+  estimations_human_markers<- mgpEstimate(exprData=count_df,
+                                          genes=markers,
+                                          geneColName="Gene",
+                                          outlierSampleRemove=F, # should outlier samples removed. This is done using boxplot stats.
+                                          geneTransform = NULL,
+                                          #function(x){homologene::mouse2human(x)$humanGene}, # this is the default option for geneTransform
+                                          groups=NULL, #if there are experimental groups provide them here. if not desired set to NULL
+                                          seekConsensus = FALSE, # ensures gene rotations are positive in both of the groups
+                                          removeMinority = TRUE)
+  mgp_info <- list("mgp_df"= count_df, "estimations_human_markers" = estimations_human_markers)
+  estimations_human_markers <- mgp_info$estimations_human_markers
+  
+  # matrix of mgp estimates per cell type, column name SST stores SST MGPs
+  mgp_est <- estimations_human_markers$estimates %>% as.data.frame() 
+  colnames(mgp_est) <- names(markers)
+  mgp_est <- mgp_est %>% tibble::rownames_to_column(var = 'projid')
+  return(mgp_est)
+}
+
+
+#get counts
+setwd('./finalCountMatrices')
+ROS_df <- readRDS("adjusted_counts.rds")
 setwd('../')
 
-#get the metadata
+#get metadata
 setwd('./cohortMetadata')
 ROS_meta <- readRDS("ROSmasterCOMPLETE.rds")
-#get the key to convert the subject ids to the ones associated with more metadata
-ROSID <- read.csv(file = 'ROSMAP_IDkey.csv', stringsAsFactors = F) 
 setwd('../')
 
-#get cognitive scores at last visit 
+
+
+#turn the RDS ROS_df object into HUGO symbols from ENSEMBL
+symbols <- mapIds(org.Hs.eg.db, keys = ROS_df$gene_ID, keytype = "ENSEMBL", column="SYMBOL")
+symbols_df <- as.data.frame(symbols)
+symbols_df <- rownames_to_column(symbols_df, "gene_ID")
+
+final_df <- merge(ROS_df, symbols_df)
+new_gene <- final_df$symbols %>% make.names(unique = T) #this is ONE way of dealing with the duplicates, just making them into separate, unique names
+final_df$new_gene <- new_gene
+n_col <- ncol(ROS_df)
+mgp_df <- final_df[,c(n_col+2,2:n_col)]
+colnames(mgp_df)[1] <- "Gene"
+
+#calculate mgps
+mgps_ROSMAP <- mgpCalc(count_df=mgp_df,markers= subclass_FINAL_noSST)
+
+
+#remove X from subject name
+mgps_ROSMAP$projid <- gsub('X', '', mgps_ROSMAP$projid, fixed=TRUE)
+
+
+#get the necessary variables
 last_cog_scores <- filter(ROS_meta, !is.na(cogn_globaln_lv))
-last_cog_scores <- last_cog_scores %>% select("projid", "cogn_globaln_lv" )
+last_cog_scores <- last_cog_scores %>% dplyr::select("projid", "cogn_globaln_lv" )
 last_cog_scores <- na.omit(last_cog_scores)
 
 #select the following pathologies for calculating cognitive residuals
@@ -437,19 +484,20 @@ pathology_names <- c("msex", "pmi", "age_death", "tangles_sqrt",
                      "cvda_4gp2", "caa_4gp", "hspath_typ", "educ",
                      "apoe4d", "apoe2d")
 
-pathology_vars <- ROS_meta %>% select("projid", all_of(pathology_names))
+#,"TMEM106B")
+
+pathology_vars <- ROS_meta %>% dplyr::select("projid", all_of(pathology_names))
 pathology_vars <- na.omit(pathology_vars)
 
 combined_data <- inner_join(last_cog_scores, pathology_vars)
 combined_data <- unique(combined_data)
 
-conversion <- data.frame("subject" = ROSID$projid, "projid" = ROSID$rnaseq_id)
-merged <- merge(conversion, ROSMGP, by="projid")
-merged <- setnames(merged, old = c('projid','subject'), new = c('subject','projid'))
-relevant_merge <- data.frame("projid"= merged$projid, "SST" = merged$SST, "IT"= merged$IT)
+relevant_merge <- data.frame("projid"= mgps_ROSMAP$projid, "SST" = mgps_ROSMAP$SST, "L3.5.IT"= mgps_ROSMAP$L3.5.IT)
+
+
 mod_info <- merge(combined_data, relevant_merge, by="projid")
 mod_info <- unique(mod_info)
-model_names <- c("BASELINE", "APOE4D","APOE2D", "IT", "APOE4D.IT", "APOE2D.IT", "SST", "APOE4D.SST", "IT.SST","APOE2D.SST" )
+model_names <- c("BASELINE", "APOE4D","APOE2D", "L3.5.IT", "APOE4D.L3.5.IT", "APOE2D.L3.5.IT", "SST", "APOE4D.SST", "L3.5.IT.SST","APOE2D.SST" )
 
 for(model in model_names){
   base_vars <- c("msex", "pmi", "age_death", "tangles_sqrt", 
@@ -469,16 +517,16 @@ for(model in model_names){
     form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe2d"), sep="",collapse=" + ")," )",sep="")
     
   }
-  else if (model == "IT"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars,"IT"), sep="",collapse=" + ")," )",sep="")
+  else if (model == "L3.5.IT"){
+    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars,"L3.5.IT"), sep="",collapse=" + ")," )",sep="")
     
   }
-  else if (model == "APOE4D.IT"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe4d + IT"), sep="",collapse=" + ")," )",sep="")
+  else if (model == "APOE4D.L3.5.IT"){
+    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe4d + L3.5.IT"), sep="",collapse=" + ")," )",sep="")
     
   }
-  else if (model == "APOE2D.IT"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars,"apoe2d + IT"), sep="",collapse=" + ")," )",sep="")
+  else if (model == "APOE2D.L3.5.IT"){
+    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars,"apoe2d + L3.5.IT"), sep="",collapse=" + ")," )",sep="")
     
   }
   else if (model == "SST"){
@@ -489,8 +537,8 @@ for(model in model_names){
     form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe4d + SST"), sep="",collapse=" + ")," )",sep="")
     
   }
-  else if (model == "IT.SST"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "IT + SST"), sep="",collapse=" + ")," )",sep="")
+  else if (model == "L3.5.IT.SST"){
+    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "L3.5.IT + SST"), sep="",collapse=" + ")," )",sep="")
     
   }
   else{
@@ -526,7 +574,7 @@ model_data_noSST$significant_bonf <- ifelse(model_data_noSST$bonf < 0.05, "***",
 Let's calculate the association between cognitive residuals in ROSMAP and rCTPs without the SST gene.
 
 ```{r}
-cell_type_names  <- (names(subclass_MTGCgG_derived_no_SST))
+cell_type_names  <- (names(subclass_FINAL_noSST))
 
 pathology_names <- c("tangles_sqrt", 
                      "amyloid_sqrt", "tdp_stage4", "braaksc",
@@ -538,7 +586,7 @@ pathology_names <- c("tangles_sqrt",
 covars <- c("msex","age_death","pmi")
 
 
-new_relevant_merge <- merged[, c("projid", cell_type_names )]
+new_relevant_merge <- mgps_ROSMAP[, c("projid", cell_type_names )]
 cell_type_names <- make.names(cell_type_names)
 colnames(new_relevant_merge) <- c("projid", cell_type_names)
 
@@ -595,13 +643,13 @@ subclass_meta <- read.csv('subclass_meta.txt')
 setwd('../')
 subclass_meta$celltype <- make.names(subclass_meta$AIBS_subclass_label)
 
-results <- merge(subclass_meta, results)
+#results <- merge(subclass_meta, results)
 
-results$class <- as.factor(results$AIBS_class_label)
-results$class <- factor(results$AIBS_class_label, levels = c("GABAergic", "Glutamatergic", 
-                                                             "Non-neuronal"))
+#results$class <- as.factor(results$AIBS_class_label)
+#results$class <- factor(results$AIBS_class_label, levels = c("GABAergic", "Glutamatergic", 
+                                                           #  "Non-neuronal"))
 
-results <- arrange(results, class)
+#results <- arrange(results, class)
 
 results$pathology <- as.factor(results$pathology)
 results$pathology <- factor(results$pathology, levels = c("amyloid_sqrt", "tangles_sqrt", 
@@ -613,13 +661,13 @@ results$pathology <- factor(results$pathology, levels = c("amyloid_sqrt", "tangl
                                                           "cogn_global_random_slope",
                                                           "BASELINEcog_res"))
 
-results <- arrange(results, class)
+#results <- arrange(results, class)
 
 sig_res <- subset(results,fdr<0.05)
 
 heatmap <- ggplot(results, aes(celltype, pathology, fill= signedFDR))+
   theme_minimal() + geom_tile() + 
-  facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
+  #facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
   scale_fill_gradient2(low="darkblue", high="darkgreen", guide="colorbar") + 
   geom_text(data=subset(sig_res), aes(label="**"), color ="white") +
   theme_minimal() +
@@ -630,12 +678,14 @@ heatmap <- ggplot(results, aes(celltype, pathology, fill= signedFDR))+
         axis.ticks.x=element_blank()) 
 
 model_data_noSST$model <- gsub(".", '+', model_data_noSST$model, fixed = T)
+model_data_noSST$model <- gsub("L3+5+IT", 'L3.5.IT', model_data_noSST$model, fixed = T)
 
 model_data_noSST$model <- factor(model_data_noSST$model, levels = rev(c("BASELINE", "APOE4D", 
-                                                          "APOE2D", "IT",
-                                                          "APOE4D+IT","APOE2D+IT","SST",
+                                                          "APOE2D", "L3.5.IT",
+                                                          "APOE4D+L3.5.IT",
+                                                          "APOE2D+L3.5.IT","SST",
                                                           "APOE2D+SST",
-                                                          "APOE4D+SST", "IT+SST")))
+                                                          "APOE4D+SST", "L3.5.IT+SST")))
 model_data_noSST <- arrange(model_data_noSST, model)
 
 model_data_noSST$range <- 
@@ -644,8 +694,9 @@ model_data_noSST$percent <-
   as.numeric(format(round(model_data_noSST$range*100, 2), nsmall = 2))
 model_data_noSST$raw_percent <- 
   as.numeric(format(round(model_data_noSST$r2*100, 2), nsmall = 2))
-#remove APOE2D info
-model_data_noSST <- model_data_noSST[-c(3, 5, 8),]
+
+
+
 
 model_plot = model_data_noSST %>% 
   ggplot(aes(x = model, y = percent ,fill = "#E6E6FA")) + 
@@ -669,19 +720,19 @@ SST_cogn <- ggplot(data=model.data, aes(y=cogn_globaln_lv, x=SST)) + theme_minim
 SST_tangles <- ggplot(data=model.data, aes(y=tangles_sqrt, x=SST)) + theme_minimal()+ geom_point() +
   geom_smooth(method=lm, se =F)  
 
-IT_cogn <- ggplot(data=model.data, aes(y=cogn_globaln_lv, x=IT)) + theme_minimal()+ geom_point() +
+L3.5.IT_cogn <- ggplot(data=model.data, aes(y=cogn_globaln_lv, x=L3.5.IT)) + theme_minimal()+ geom_point() +
   geom_smooth(method=lm, se =F)  
 
 
-IT_tangles <- ggplot(data=model.data, aes(y=tangles_sqrt, x=IT)) + theme_minimal()+ geom_point() +
+L3.5.IT_tangles <- ggplot(data=model.data, aes(y=tangles_sqrt, x=L3.5.IT)) + theme_minimal()+ geom_point() +
   geom_smooth(method=lm, se =F)  
 
-IT_amyloid <- ggplot(data=model.data, aes(y=amyloid_sqrt, x=IT)) + theme_minimal()+ geom_point() +
+L3.5.IT_amyloid <- ggplot(data=model.data, aes(y=amyloid_sqrt, x=L3.5.IT)) + theme_minimal()+ geom_point() +
   geom_smooth(method=lm, se =F) 
 
 mid_plots = plot_grid(SST_cogn, SST_amyloid, 
-                     SST_tangles,IT_cogn,
-                     IT_amyloid, IT_tangles,  nrow = 2, ncol = 3,
+                     SST_tangles,L3.5.IT_cogn,
+                     L3.5.IT_amyloid, L3.5.IT_tangles,  nrow = 2, ncol = 3,
                      axis = 'l', align = 'v', labels = c('B', 'C', 'D', 'E', 'F', 'G')) 
 
 full_plot = plot_grid(heatmap, mid_plots, model_plot, nrow = 3 , rel_heights = c(5,4, 5), 
@@ -690,283 +741,6 @@ full_plot = plot_grid(heatmap, mid_plots, model_plot, nrow = 3 , rel_heights = c
 setwd('./figures')
 saveRDS(full_plot, "figure4-noSST.rds")
 pdf(file = "figure4-noSST.pdf", 
-    width = 10, # The width of the plot in inches
-    height = 12)
-print(full_plot)
-dev.off()
-setwd('../')
-
-print(full_plot)
-```
-Alright let's try this again with the newest marker list :)
-```{r}
-marker <- c("subclass_new_common_final")
-setwd('./commonMarkerLists')
-#get marker list
-subclass_new <-  readRDS(paste0(marker, '.rds'))
-setwd('../')
-
-#get MGP, aka the rCTPs
-mgp_name <-"mgp_ROSMAP"
-setwd('./mgpResults_subclass_new')
-ROS_mgp <- readRDS(paste0(mgp_name, ".rds"))
-ROSMGP <- ROS_mgp$model
-setwd('../')
-
-#get the metadata
-setwd('./cohortMetadata')
-ROS_meta <- readRDS("ROSmasterCOMPLETE.rds")
-#get the key to convert the subject ids to the ones associated with more metadata
-ROSID <- read.csv(file = 'ROSMAP_IDkey.csv', stringsAsFactors = F) 
-setwd('../')
-
-#get cognitive scores at last visit 
-last_cog_scores <- filter(ROS_meta, !is.na(cogn_globaln_lv))
-last_cog_scores <- last_cog_scores %>% select("projid", "cogn_globaln_lv" )
-last_cog_scores <- na.omit(last_cog_scores)
-
-#select the following pathologies for calculating cognitive residuals
-pathology_names <- c("msex", "pmi", "age_death", "tangles_sqrt", 
-                     "amyloid_sqrt", "tdp_stage4", "braaksc",
-                     "dlbdx", "plaq_n", "plaq_d", "ci_num2_gct",
-                     "cvda_4gp2", "caa_4gp", "hspath_typ", "educ",
-                     "apoe4d", "apoe2d")
-
-pathology_vars <- ROS_meta %>% select("projid", all_of(pathology_names))
-pathology_vars <- na.omit(pathology_vars)
-
-combined_data <- inner_join(last_cog_scores, pathology_vars)
-combined_data <- unique(combined_data)
-
-conversion <- data.frame("subject" = ROSID$projid, "projid" = ROSID$rnaseq_id)
-merged <- merge(conversion, ROSMGP, by="projid")
-merged <- setnames(merged, old = c('projid','subject'), new = c('subject','projid'))
-relevant_merge <- data.frame("projid"= merged$projid, "SST" = merged$SST, "L2/3 IT"= merged$`L2/3 IT`)
-mod_info <- merge(combined_data, relevant_merge, by="projid")
-mod_info <- unique(mod_info)
-model_names <- c("BASELINE", "APOE4D","APOE2D", "L2.3.IT", "APOE4D.L2.3.IT", "APOE2D.L2.3.IT", "SST", "APOE4D.SST", "L2.3.IT.SST","APOE2D.SST" )
-
-for(model in model_names){
-  base_vars <- c("msex", "pmi", "age_death", "tangles_sqrt", 
-                "amyloid_sqrt", "tdp_stage4", "braaksc",
-                "dlbdx", "plaq_n", "plaq_d", "ci_num2_gct",
-                "cvda_4gp2", "caa_4gp", "hspath_typ", "educ")
-  
-  if(model == "BASELINE"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(base_vars, sep="",collapse=" + ")," )",sep="")
-
-  }
-  else if (model == "APOE4D"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe4d"), sep="",collapse=" + ")," )",sep="")
-
-  }
-  else if (model == "APOE2D"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe2d"), sep="",collapse=" + ")," )",sep="")
-    
-  }
-  else if (model == "L2.3.IT"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars,"L2.3.IT"), sep="",collapse=" + ")," )",sep="")
-    
-  }
-  else if (model == "APOE4D.L2.3.IT"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe4d + L2.3.IT"), sep="",collapse=" + ")," )",sep="")
-    
-  }
-  else if (model == "APOE2D.L2.3.IT"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars,"apoe2d + L2.3.IT"), sep="",collapse=" + ")," )",sep="")
-    
-  }
-  else if (model == "SST"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "SST"), sep="",collapse=" + ")," )",sep="")
-    
-  }
-  else if (model == "APOE4D.SST"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe4d + SST"), sep="",collapse=" + ")," )",sep="")
-    
-  }
-  else if (model == "L2.3.IT.SST"){
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "L2.3.IT + SST"), sep="",collapse=" + ")," )",sep="")
-    
-  }
-  else{
-    form <- paste("as.formula( mod_info$cogn_globaln_lv ~ ",paste(append(base_vars, "apoe2d + SST"), sep="",collapse=" + ")," )",sep="")
-  }
-  
-  mod_cog <- ols(eval(parse(text=form)), data=mod_info, x=T, y=T)
-  mod_for_anova <- lm(eval(parse(text=form)), data= mod_info)
-  validation_data <- validate(mod_cog, method=".632", B=100) 
-  setwd('./ROSMAPcogRes')
-  saveRDS(mod_cog, paste0(model, "cog_res_model.rds"))
-  assign(paste0(model, "cog_ANOVA_model"), mod_for_anova)
-  setwd('../')
-  print(model)
-  mod_info[paste0(model, "cog_res")] <- resid(mod_cog)
-  if(model=="BASELINE"){
-    model_data_new <- data.frame("model" = model, "r2" = mod_cog$stats['R2'], "optimisim" = validation_data[1,4], "corrR2" =validation_data[1,5], "p.val" = NA)
-    
-  }
-  else{
-    significance <- (anova(BASELINEcog_ANOVA_model, mod_for_anova)[6])[2,1]
-    temp = data.frame("model" = model, "r2" = mod_cog$stats['R2'], "optimisim" = validation_data[1,4], "corrR2" =validation_data[1,5], "p.val" = significance)
-    model_data_new <- rbind(model_data_new, temp)
-  }
-  
-}
-
-model_data_new$FDR <- p.adjust(model_data_new$p.val, method="fdr")
-model_data_new$significant <- ifelse(model_data_new$FDR < 0.05, "**", "")
-model_data_new$bonf <- p.adjust(model_data_new$p.val, method="bonf")
-model_data_new$significant_bonf <- ifelse(model_data_new$bonf < 0.05, "***", "")
-```
-Let's plot.
-
-```{r}
-cell_type_names  <- (names(subclass_new_common_final))
-
-pathology_names <- c("tangles_sqrt", 
-                     "amyloid_sqrt", "tdp_stage4", "braaksc",
-                     "dlbdx", "plaq_n_sqrt", "plaq_d_sqrt", "ci_num2_gct",
-                     "cvda_4gp2", "caa_4gp", "hspath_any", "cogn_globaln_lv",
-                     "cogn_global_random_slope", "BASELINEcog_res")
-
-
-covars <- c("msex","age_death","pmi")
-
-
-new_relevant_merge <- merged[, c("projid", cell_type_names )]
-cell_type_names <- make.names(cell_type_names)
-colnames(new_relevant_merge) <- c("projid", cell_type_names)
-
-
-new_mod_info <- merge(combined_data, new_relevant_merge, by="projid")
-new_mod_info <- merge(new_mod_info, ROS_meta)
-new_mod_info <- merge(unique(new_mod_info), mod_info)
-model.data <- new_mod_info
-
-
-results <- sapply(cell_type_names,function(celltype) {
-  sapply(pathology_names, function(pathology) {
-    
-    if(pathology =="cogn_global_random_slope" |pathology =="cogn_globaln_lv" | pathology =="BASELINEcog_res"  ){
-      covars <-c("educ", "age_bl", "msex", "age_death", "pmi")
-    }
-    form <- as.formula(paste0(celltype,"~",pathology," + ",paste0(covars,collapse=" + "))) 
-    if(pathology == 'LOAD'){
-      model <- lm(data=model.data,form)
-      p <- anova(model)[pathology,5]
-      beta <- coef(model)['LOAD1']
-    }
-    else{
-      model <- lm(data=model.data,form)
-      p <- anova(model)[pathology,5]
-      beta <- coef(model)[pathology]
-    }
-    n <- nrow(model$model)
-    
-    return(c(celltype,pathology,beta, p,n))
-    
-  })
-})
-
-results <- as.data.frame(matrix(results,ncol=5,byrow = T),stringsAsFactors = F)
-names(results) <- c("celltype","pathology","beta","p","n")
-
-results <- within(results,{
-  p <- as.numeric(p)
-  beta <- as.numeric(beta)
-  n <- as.numeric(n)})
-
-results$bonfp <- p.adjust(results$p, method="bonferroni")
-results$fdr <- p.adjust(results$p, method="fdr")
-results$signedFDR <- -log10(results$fdr) *(sign(results$beta))
-
-results$pathology <- as.factor(results$pathology)
-results$pathology <- factor(results$pathology, levels = c("amyloid_sqrt", "tangles_sqrt", 
-                                                          "tdp_stage4", 
-                                                          "braaksc", "dlbdx", "plaq_d_sqrt",
-                                                          "plaq_n_sqrt", "ci_num2_gct",
-                                                          "cvda_4gp2", "hspath_any",
-                                                          "caa_4gp","cogn_globaln_lv",
-                                                          "cogn_global_random_slope",
-                                                          "BASELINEcog_res"))
-
-
-sig_res <- subset(results,fdr<0.05)
-
-heatmap <- ggplot(results, aes(celltype, pathology, fill= signedFDR))+
-  theme_minimal() + geom_tile() + 
-  scale_fill_gradient2(low="darkblue", high="darkgreen", guide="colorbar") + 
-  geom_text(data=subset(sig_res), aes(label="**"), color ="white") +
-  theme_minimal() +
-  theme(axis.title.y=element_blank(),
-        axis.title.x=element_blank(),
-        axis.ticks.y=element_blank(),
-        axis.text.x = element_text(angle = 90),
-        axis.ticks.x=element_blank()) 
-
-model_data_new$model <- gsub(".", '+', model_data_new$model, fixed = T)
-model_data_new$model <- gsub("L2+3+IT", 'L2.3.IT', model_data_new$model, fixed = T)
-
-model_data_new$model <- factor(model_data_new$model, levels = rev(c("BASELINE", "APOE4D", 
-                                                          "APOE2D", "L2.3.IT",
-                                                          "APOE4D+L2.3.IT",
-                                                          "APOE2D+L2.3.IT","SST",
-                                                          "APOE2D+SST",
-                                                          "APOE4D+SST", "L2.3.IT+SST")))
-model_data_new <- arrange(model_data_new, model)
-
-model_data_new$range <- 
-  model_data_new$r2 - model_data_new$r2[length(model_data_new$r2)]
-model_data_new$percent <- 
-  as.numeric(format(round(model_data_new$range*100, 2), nsmall = 2))
-model_data_new$raw_percent <- 
-  as.numeric(format(round(model_data_new$r2*100, 2), nsmall = 2))
-#remove APOE2D info
-model_data_new <- model_data_new[-c(3, 5, 8),]
-
-model_plot = model_data_new %>% 
-  ggplot(aes(x = model, y = percent ,fill = "#E6E6FA")) + 
-  scale_fill_manual(values = "#967bb6") +
-  scale_y_continuous(expand = c(0,0))+
-  geom_bar(stat = "identity", show.legend = FALSE) + 
-  ylab(paste0('Additional % Variance Explained \n Beyond Baseline ', format(round(model_data_new$r2[length(model_data_new$r2)]*100)), '% R2')) + 
-  xlab('Model for Residual Cogniton') +  coord_flip()
-
-print(heatmap)
-print(model_plot)
-
-
-#generate SST/IT scatter plots for cognitive slope, amyloid, and tangles
-SST_amyloid <- ggplot(data=model.data, aes(y=amyloid_sqrt, x=SST)) + theme_minimal()+ geom_point() +
-  geom_smooth(method=lm, se =F) 
-
-SST_cogn <- ggplot(data=model.data, aes(y=cogn_globaln_lv, x=SST)) + theme_minimal()+ geom_point() +
-  geom_smooth(method=lm, se =F) 
-
-SST_tangles <- ggplot(data=model.data, aes(y=tangles_sqrt, x=SST)) + theme_minimal()+ geom_point() +
-  geom_smooth(method=lm, se =F)  
-
-L2.3.IT_cogn <- ggplot(data=model.data, aes(y=cogn_globaln_lv, x=L2.3.IT)) + theme_minimal()+ geom_point() +
-  geom_smooth(method=lm, se =F)  
-
-
-L2.3.IT_tangles <- ggplot(data=model.data, aes(y=tangles_sqrt, x=L2.3.IT)) + theme_minimal()+ geom_point() +
-  geom_smooth(method=lm, se =F)  
-
-L2.3.IT_amyloid <- ggplot(data=model.data, aes(y=amyloid_sqrt, x=L2.3.IT)) + theme_minimal()+ geom_point() +
-  geom_smooth(method=lm, se =F) 
-
-mid_plots = plot_grid(SST_cogn, SST_amyloid, 
-                     SST_tangles,L2.3.IT_cogn,
-                     L2.3.IT_amyloid, L2.3.IT_tangles,  nrow = 2, ncol = 3,
-                     axis = 'l', align = 'v', labels = c('B', 'C', 'D', 'E', 'F', 'G')) 
-
-full_plot = plot_grid(heatmap, mid_plots, model_plot, nrow = 3 , rel_heights = c(5,4, 5), 
-                     labels = c('A', '', 'H'))
-
-setwd('./figures')
-saveRDS(full_plot, "figure4-new.rds")
-pdf(file = "figure4-new.pdf", 
     width = 10, # The width of the plot in inches
     height = 12)
 print(full_plot)
