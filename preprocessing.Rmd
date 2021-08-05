@@ -1,7 +1,8 @@
-<<<<<<< HEAD
 ---
 title: "Pre-processing"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 
@@ -22,18 +23,16 @@ Now that we've loaded in the necessary libraries we want to load in the raw coun
 ```{r}
 #function to create YDGE objects for each cohort in the study
 createYDGEAMPAD <- function(cohort){
-  setwd('./rawCohortData')
   if (cohort == "ROSMAP"){
-    filename <- "ROSMAP_all_counts_matrix.txt.gz"
+    filename <- "./rawCohortData/ROSMAP_all_counts_matrix.txt.gz"
   }
   if(cohort =="MAYO"){
-    filename <- "Mayo_TCX_all_counts_matrix.txt.gz"
+    filename <- "./rawCohortData/Mayo_TCX_all_counts_matrix.txt.gz"
   }
   if(cohort == "MSBB"){
-    filename <- "MSSM_all_counts_matrix.txt.gz"
+    filename <- "./rawCohortData/MSSM_all_counts_matrix.txt.gz"
   }
   all_counts <- read.table(gzfile(filename),sep="\t")
-  setwd('../')
   
   colnames(all_counts) <- as.character(unlist(all_counts[1,]))
   all_counts <- all_counts[-c(1:5),]
@@ -44,40 +43,34 @@ createYDGEAMPAD <- function(cohort){
   
   if(cohort == "ROSMAP"){
     # read in phenotype/covariate data
-    setwd('./cohortMetadata')
-    pdata <- read.table("ageCensoredCovariates.tsv", sep="\t",header=T,check.names = F,stringsAsFactors = F)
-    setwd('../')
+    pdata <- read.table("./cohortMetadata/ageCensoredCovariates.tsv", sep="\t",header=T,check.names = F,stringsAsFactors = F)
     rownames(pdata) <- pdata$SampleID  
     subjects_to_include <-  pdata$SampleID[which(pdata$Diagnosis %in% c("AD","CONTROL"))]
   }
   if(cohort == "MAYO"){
     # read in phenotype/covariate data
-    setwd('./cohortMetadata')
-    pdata <- read.table("MAYO_CBE_TCX_Covariates.tsv", sep="\t",header=T,check.names = F,stringsAsFactors = F)
-    setwd('../')
+    pdata <- read.table("./cohortMetadata/MAYO_CBE_TCX_Covariates.tsv", sep="\t",header=T,check.names = F,stringsAsFactors = F)
     # Keep only AD cases and controls
     rownames(pdata) <- pdata$SampleID
     subjects_to_include <- pdata$SampleID[which(pdata$Tissue.Diagnosis %in% c("TCX.AD","TCX.CONTROL"))]
   } 
   if(cohort == "MSBB"){
     # read in phenotype/covariate data
-    setwd('./cohortMetadata')
-    pdata <- read.table("MSBB_RNAseq_covariates_November2018Update.csv", sep=",",header=T,check.names = F,stringsAsFactors = F)
+    pdata <- read.table("./cohortMetadata/MSBB_RNAseq_covariates_November2018Update.csv", sep=",",header=T,check.names = F,stringsAsFactors = F)
     
     # "BM_22_", "BM_36_", "BM_10_", "BM_44" are 4 brodmann areas of msbb
-    phenodata <- read.table("msbb_individual_metadata.csv", sep=",",header=T,check.names = F,stringsAsFactors = F)
+    phenodata <- read.table("./cohortMetadata/msbb_individual_metadata.csv", sep=",",header=T,check.names = F,stringsAsFactors = F)
     phenodata <- phenodata %>% 
       dplyr::rename(
         individualIdentifier = individualID,
       )
     pdata <- merge(pdata, phenodata, by="individualIdentifier")
     #remove 272 samples as specified in syn8484987
-    samples<- read.table("removesinai.txt", sep=",",header=T,check.names = F,stringsAsFactors = F)
+    samples<- read.table("./cohortMetadata/removesinai.txt", sep=",",header=T,check.names = F,stringsAsFactors = F)
     for (sample in colnames(samples)){
       pdata <- subset(pdata, 
                       sampleIdentifier != sample)
     }
-    setwd('../')
     #create diagnosis variable as specified in syn8484987
     pdata$Diagnosis = 'OTHER'
     #HAD TO MOD FROM OG CODE: NP.1 is now CERAD, bbscore is now Braak
@@ -109,9 +102,7 @@ createYDGEAMPAD <- function(cohort){
     idsAcross <- data.frame("sampleIdentifier" = pdata$sampleIdentifier, "individualIdentifier" = pdata$individualIdentifier)
     allMSBBsubs <- subs 
     MSBBIDsAcross <-  inner_join(allMSBBsubs, idsAcross)
-    setwd('./rawCohortData')
-    saveRDS(MSBBIDsAcross, "allMSBBIDs.rds")
-    setwd('../')
+    saveRDS(MSBBIDsAcross, "./rawCohortData/allMSBBIDs.rds")
   }
   if(cohort == "ROSMAP" | cohort=="MAYO"){
     cohort_ydge_name <-  paste0(cohort, "ydge")
@@ -121,9 +112,7 @@ createYDGEAMPAD <- function(cohort){
                     group=pdata[subjects_to_include,"Source"])
     print(cohort_ydge_name)
     assign(cohort_ydge_name, ydge)
-    setwd('./rawYDGE')
-    saveRDS(ydge, file=paste0("raw_", cohort_ydge_name, ".rds"))
-    setwd('../')
+    saveRDS(ydge, file=paste0("./rawYDGE/raw_", cohort_ydge_name, ".rds"))
   }
   else{
     for(MSBB in MSBBs){
@@ -136,9 +125,7 @@ createYDGEAMPAD <- function(cohort){
       region_ydge_name <- paste0(region, "ydge")
       print(region_ydge_name)
       assign(region_ydge_name, ydge)
-      setwd('./rawYDGE')
-      saveRDS(ydge, file=paste0("raw_", region_ydge_name, ".rds"))
-      setwd('../')
+      saveRDS(ydge, file=paste0("./rawYDGE/raw_", region_ydge_name, ".rds"))
     }
     
   }
@@ -159,10 +146,8 @@ for(cohort in cohorts){
   }
   print(cohort)
   cohort_ydge_name <-  paste0(cohort, "ydge")
-  filename <- paste0("raw_", cohort_ydge_name, ".rds")
-  setwd('./rawYDGE')
+  filename <- paste0("./rawYDGE/raw_", cohort_ydge_name, ".rds")
   raw_ydge <- readRDS(filename)
-  setwd('../')
   assign(cohort_ydge_name, raw_ydge)
 }
 ```
@@ -189,11 +174,9 @@ QCpipelineAMPAD <- function(cohort){
   }
   print(cohort)
   cohort_ydge_name <-  paste0(cohort, "ydge")
-  filename <- paste0("raw_", cohort_ydge_name, ".rds")
+  filename <- paste0("./rawYDGE/raw_", cohort_ydge_name, ".rds")
   ### read in raw ydge for each dataset
-  setwd('./rawYDGE')
   raw_ydge <- readRDS(filename)
-  setwd('../')
   ### run through unified QC pipeline, running PCA separately 
   PCBYGROUP <- T
   SUBTHRES <- 3
@@ -205,7 +188,7 @@ QCpipelineAMPAD <- function(cohort){
                variance.prune = F,
                high.prune = F)
   
-  fileConn<-file(paste0(cohort,"QCresults.txt"))
+  fileConn<-file(paste0("./QCpipelineResults/",cohort,"QCresults.txt"))
   writeLines(
     c(paste(t(y$returnparams)[,1],collapse=": "),
       paste(t(y$returnparams)[,2],collapse=": "),
@@ -224,19 +207,17 @@ QCpipelineAMPAD <- function(cohort){
     fileConn)
   close(fileConn)
   
-  setwd('./QCpipelineResults')
   y_name <-  paste0("QCd_ydge_", cohort)
   y2 <- calcNormFactors(y$YDGE)
   assign(y_name, y2)
   print(y_name)
-  saveRDS(y2,file=paste0(y_name, ".rds"))
+  saveRDS(y2,file=paste0("./QCpipelineResults/",y_name, ".rds"))
   
   v_name <-  paste0("v_", cohort)
   v <- voom(y2)
   assign(v_name, v)
   print(v_name)
-  saveRDS(v,file=paste0(v_name, ".rds"))
-  setwd('../')
+  saveRDS(v,file=paste0("./QCpipelineResults/",v_name, ".rds"))
 }
 
 #run QC on each cohort
@@ -254,17 +235,13 @@ for(cohort in cohorts){
   }
   print(cohort)
   y_name <-  paste0("QCd_ydge_", cohort)
-  filename <- paste0(y_name, ".rds")
-  setwd('./QCpipelineResults')
+  filename <- paste0("./QCpipelineResults/",y_name, ".rds")
   y <- readRDS(filename)
-  setwd('../')
   assign(y_name, y)
   
   v_name <-  paste0("v_", cohort)
-  filename <- paste0(v_name, ".rds")
-  setwd('./QCpipelineResults')
+  filename <- paste0("./QCpipelineResults/",v_name, ".rds")
   voom <- readRDS(filename)
-  setwd('../')
   assign(v_name, voom)
   print(v_name)
 }
@@ -303,13 +280,11 @@ removeBatchAMPAD <- function(cohort){
   }
   print(cohort)
   cohort_QC_ydge_name <-  paste0("QCd_ydge_", cohort)
-  QC_filename <- paste0(cohort_QC_ydge_name, ".rds")
-  voom_filename <- paste0("v_", cohort, ".rds")
+  QC_filename <- paste0("./QCpipelineResults/",cohort_QC_ydge_name, ".rds")
+  voom_filename <- paste0("./QCpipelineResults/", "v_", cohort, ".rds")
   ### read in QCd data
-  setwd('./QCpipelineResults')
   QC_ydge <- readRDS(QC_filename)
   voom <- readRDS(voom_filename)
-  setwd('../')
   matrix_name <- paste0(cohort, "_matrix")
   lmod_name <-  paste0("lmod_" ,cohort)
   #set variables to correct class within each voom object
@@ -359,9 +334,7 @@ removeBatchAMPAD <- function(cohort){
     Acovs <- cbind(voom$targets[,all.covs],model.matrix( ~ voom$targets$batch - 1))
     
   }
-  setwd('./QCpipelineResults')
   saveRDS(voom, voom_filename)
-  setwd('../')
   designtext <- paste("model.matrix( ~ ",paste("voom$targets$",designvars,sep="",collapse=" + ")," )",sep="")
   design <- eval(parse(text=designtext))
   
@@ -372,20 +345,17 @@ removeBatchAMPAD <- function(cohort){
                                      covariates= Acovs)
   
   assign(matrix_name, cohort_matrix)
-  setwd('./finalCountMatrices')
-  saveRDS(cohort_matrix, file=paste0(matrix_name, ".rds"))
-  setwd('../')
+  saveRDS(cohort_matrix, file=paste0('./finalCountMatrices/', matrix_name, ".rds"))
   
   #save lmFit run 
   lmod <- lmFit(voom,design= design,method="robust",maxit=10000)
   assign(lmod_name, lmod)
-  setwd('./cohortQCMods')
-  saveRDS(lmod, file=paste0(lmod_name, ".rds"))
+  saveRDS(lmod, file=paste0('./cohortQCMods/', lmod_name, ".rds"))
   
   eb <- eBayes(lmod,robust = T)
   eb_name <- paste0(cohort, "_eb")
   assign(eb_name, eb)
-  saveRDS(eb,file=paste0(eb_name, ".rds"))
+  saveRDS(eb,file=paste0('./cohortQCMods/', eb_name, ".rds"))
   
   coefnum <- grep("LOAD",colnames(eb))
   tt <- topTable(eb,coef=coefnum,20000,sort.by = "none")
@@ -401,8 +371,7 @@ removeBatchAMPAD <- function(cohort){
   assign(tt_name, tt)
   
   # save toptable (tt) of all summary stats
-  saveRDS(tt,file=paste0(tt_name, ".rds"))
-  setwd('../')
+  saveRDS(tt,file=paste0('./cohortQCMods/', tt_name, ".rds"))
   
 }
 
@@ -426,16 +395,13 @@ for(cohort in cohorts){
   matrix_name <- paste0(cohort, "_matrix")
   lmod_name <-  paste0("lmod_" ,cohort)
   
-  filename <- paste0(matrix_name, ".rds")
-  setwd('./finalCountMatrices')
+  filename <- paste0('./finalCountMatrices/', matrix_name, ".rds")
   matrix <- readRDS(filename)
-  setwd('../')
   assign(matrix_name, matrix)
   
-  filename <- paste0(lmod_name, ".rds")
-  setwd('./cohortQCMods')
+  filename <- paste0('./cohortQCMods/', lmod_name, ".rds")
   lmod <- readRDS(filename)
-  setwd('../')
   assign(lmod_name, lmod)
 }
+```
 

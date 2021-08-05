@@ -1,0 +1,573 @@
+---
+title: "MGP Calculation (rCTP derivation) -- FINAL"
+output:
+  html_document:
+    df_print: paged
+---
+```{r echo=FALSE, cache=FALSE, comment=FALSE, warning=FALSE}
+#load necessary libraries
+library(magrittr)
+library(tidyverse)
+library(ggplot2)
+library(ggrepel)
+library(limma)
+library(edgeR)
+library(rms)
+library(useful)
+library(stringr)
+library(markerGeneProfile)
+library(rlist)
+library(kableExtra)
+```
+
+Now that we've loaded in the necessary libraries we can set up the marker gene lists to run the MGP algorithm. These marker gene lists will be used to describe each of the cell types in the relative cell-type proportions (rCTPs) we are calculating for each cohort. 
+There are marker lists calculated from the cingulate gyrus (CgG) and  middle temporal gyrus (MTG) at the resolution of neuronal subclasses  (SST cells, IT cells) called "subclass_CgG_MTG". Additionally there are validated published marker gene lists for comparison from the Lake et. al (2017) and Darmanis et al. (2015) datasets (defined at the inhibitory/excitatory resolution), hereafter referred to as "lake" and "darmanis". 
+```{r}
+marker_lists <- c("lake", "darmanis")
+for(marker in marker_lists){
+  markers_df <-  readRDS(paste0('./markerLists/', marker, '.rds'))
+  assign(marker, markers_df)
+}
+
+subclass_CgG_MTG = read_csv(url('https://raw.githubusercontent.com/sonnyc247/MarkerSelection/master/Data/Outputs/CSVs_and_Tables/Markers/MTG_and_CgG_lfct2/new_MTGnCgG_lfct2.5_results.csv'))
+cell_types = subclass_CgG_MTG %>% pull(subclass) %>% unique
+subclass_CgG_MTG <- lapply(cell_types, function(cell_type){
+      return(subclass_CgG_MTG) %>% 
+               filter(subclass == cell_type) %>% pull(gene)
+    })
+names(subclass_CgG_MTG) <- cell_types
+subclass_CgG_MTG <-subclass_CgG_MTG[lapply(subclass_CgG_MTG,length)>0]
+```
+Now that we've loaded in all the marker lists we want to load in all our cohorts count matrices. The cohorts were defined in pre-processing and we will continue to use those definitions: the Religious Orders Study and Rush Memory and Aging Project cohort (delineated ROSMAP from here on) which has dorsolateral prefrontal cortex samples, the Mayo Clinic cohort, hereafter referred to as MAYO, which consists of temporal cortex samples and the Mount Sinai Brain Bank cohort (referred to as MSBB), which has expression data sampled from Brodmann area 10, 22, 36 and 44 (written BM10, BM22, BM36, BM44 hereafter).
+```{r}
+#load in new cohorts QC-ed data, final count matrices and convert them to dataframes with HGNC symbols instead of ENSEMBL ids
+cohorts <- c("ROSMAP", "MAYO", "MSBBM10", "MSBBM22", "MSBBM36", "MSBBM44")
+for(cohort in cohorts){
+  if(str_detect(cohort, "MSBB")){
+    cohort <- gsub('MSB', '', cohort) 
+  }
+  print(cohort)
+  matrix_name <- paste0(cohort, "_matrix")
+  
+  if(cohort=="ROSMAP"){
+    filename <- "./finalCountMatrices/adjusted_counts.rds"
+  }
+  else{
+    filename <- paste0('./finalCountMatrices/', matrix_name, ".rds")
+  }
+  
+  matrix <- readRDS(filename)
+  assign(matrix_name, matrix)
+
+  count_df <- as.data.frame(matrix)
+  if(cohort!= "ROSMAP"){
+     count_df <- tibble:: rownames_to_column(count_df, var="Gene")
+  }
+  else{
+     count_df <- count_df %>% dplyr::rename(Gene = gene_ID)
+     colnames(count_df) <- gsub(x = colnames(count_df), pattern = "X", replacement = "") 
+  }
+ 
+  gene_anno <- readRDS("./geneAnno/gene_anno.rds")
+  final_df <- merge(count_df, gene_anno)
+  new_gene <- final_df$Hgnc_Gene %>% make.names(unique = T) #this is ONE way of dealing with the duplicates, just making them into separate, unique names
+  final_df$new_gene <- new_gene
+  n_col <- ncol(count_df)
+  mgp_df <- final_df[,c(n_col+2,2:n_col)]
+  count_df <- mgp_df %>% dplyr::rename(Gene = new_gene)
+  df_name <- paste0(cohort, "_count_df")
+  assign(df_name, count_df)
+}
+```
+Now that we have our marker lists and our cohort data loaded and converted to HGNC symbols, we want to get the list of common marker genes that are found within each cohort. Each marker gene list defines a cell type through a list of marker genes that are highly expressed and uniquely expressed in that cell type (to an extent). However, not all of the marker genes that define cell type proportions are found in each of the cohorts, for example: *geneX* is used to define *celltypeX*, and is found in cohorts BM10, BM22, and ROSMAP. Since *geneX* is not found in MAYO, BM36 or BM44 we do not want to include it in the list of marker genes used to define *celltypeX* as these relative cell type proportions (rCTPs) will then be less comparable across cohorts. As such we're going to run a QC function for the markerGeneProfile (MGP) method on all of the markers and then take all the markers found across all cohorts, and drop all the celltypes that have 4 or less genes defining them. 
+
+```{r}
+#we define our QC algorithm such that it returns a dataframe with the cell type, markers_used (list of marker genes used ' per cell type), removed_marker_ratios (list of removed marker ratios per cell type) and percent_variance_PC1 (list of variance explained by the first PC per cell type)
+mgpQCMetrics <-function(count_df, mgp_markers){
+  
+  if(!all(c("Gene") %in% colnames(count_df))){
+    stop("The count_df argument must be a df with a column named Gene (HGNC gene symbols)")
+  }
+  mgp_est<- markerGeneProfile::mgpEstimate(exprData=count_df,
+                                                  genes=mgp_markers,
+                                                  geneColName="Gene",
+                                                  outlierSampleRemove=F, # should outlier samples removed. This is done using boxplot stats.
+                                                  geneTransform =NULL, #function(x){homologene::mouse2human(x)$humanGene}, # this is the default option for geneTransform
+                                                  groups=NULL, #if there are experimental groups provide them here. if not desired set to NULL
+                                                  seekConsensus = FALSE, # ensures gene rotations are positive in both of the groups
+                                                  removeMinority = TRUE)
+  i= 0
+  for(cell in names(mgp_markers)){
+    i = i + 1
+    cells_df <- mgp_est$usedMarkerExpression[i] %>% as.data.frame()
+    masterlist <- paste0(rownames(cells_df), collapse=', ')
+    num_markers <- length(rownames(cells_df))
+    rm_marker_ratios <- mgp_est$removedMarkerRatios[i]
+    if(!is.null(mgp_est$trimmedPCAs[[i]])){
+      percent_variance <- ((summary(mgp_est$trimmedPCAs[[i]]))[6]) %>% as.data.frame()
+      percent_variance_PC1 <- percent_variance[2,1]
+    }
+    else{
+      percent_variance_PC1 <- NA
+    }
+    if(i==1){
+      master_df <- data.frame( "markers_used" = masterlist, 
+                        "removed_marker_ratios" = rm_marker_ratios,
+                        "percent_variance_PC1" = percent_variance_PC1, 
+                        "num_markers" = num_markers)  
+    }
+    else{
+      df <- data.frame( "markers_used" = masterlist, 
+                        "removed_marker_ratios" = rm_marker_ratios,
+                        "percent_variance_PC1" = percent_variance_PC1, 
+                        "num_markers" = num_markers)
+      master_df <- rbind(master_df, df)
+    }
+  }
+  master_df <- tibble::rownames_to_column(master_df, var = "celltype")
+  return(master_df)
+}
+#calculate QC metrics for each marker gene list for each cohort
+cohorts <- c("ROSMAP", "MAYO", "MSBBBM10", "MSBBBM22", "MSBBBM36", "MSBBBM44")
+marker_lists <- c("subclass_CgG_MTG", "lake", "darmanis")
+for(markers in marker_lists){
+  for(cohort in cohorts){
+    if(str_detect(cohort, "MSBB")){
+      cohort <- gsub('MSBB', '', cohort) 
+    }
+    print(cohort)
+    df_name <- paste0(cohort, "_count_df")
+    mgpResult <- mgpQCMetrics(get(df_name), mgp_markers = get(markers))
+    mgpResult$cohort <- cohort
+    mgpName <- paste0("mgpQCResults",cohort, markers)
+    assign(mgpName, mgpResult)
+    saveRDS(get(mgpName), paste0('./mgpQC_',markers, '/', mgpName, ".rds"))
+    print(mgpName)
+    assign(mgpName, mgpResult)
+    if(cohort =="ROSMAP"){
+      all_cohorts_QC <- mgpResult
+    }
+    else{
+      all_cohorts_QC <-rbind(all_cohorts_QC, mgpResult)
+    }
+  }
+  all_cohorts_QC$cohort <- factor(all_cohorts_QC$cohort, levels = c("ROSMAP", "BM10", "BM44", "BM22", "BM36", "MAYO"))
+  all_cohorts_QC <- arrange(all_cohorts_QC, cohort)
+  saveRDS(all_cohorts_QC, paste0('./mgpQC_',markers, '/all_cohorts_QC.rds'))
+  }
+```
+We now have a wide variety of QC results for each of the marker gene lists and each of the cohorts. Let's plot some of the data to see what our results look like, before we only take the genes found commonly across each cohort.
+```{r echo=FALSE, cache=FALSE, comment=FALSE, warning=FALSE}
+for(markers in marker_lists){
+    all_cohorts_QC <- readRDS(paste0('./mgpQC_',markers, "/all_cohorts_QC.rds"))
+    QC_name <- paste0('all_cohorts_QC_',markers)
+    assign(QC_name, all_cohorts_QC)
+    
+    QCplot <- get(QC_name) %>%  ggplot(aes(x = celltype, y = num_markers)) +
+      theme_minimal() +
+      geom_bar(stat = "identity", fill = "#e0abf5") +
+      geom_hline(yintercept = 4) + 
+      facet_wrap(~cohort, scales = 'free_x',nrow=1) + 
+      ggtitle(paste0("Plot of Number of Markers Per Celltype \n Available in Each Dataset for ", markers, " Marker List")) +
+      theme(axis.text.x = element_text(angle = 45, vjust = 0.5),
+            axis.title.x = element_text('Cell Type'),
+            axis.title.y = element_text('Markers Used')) +
+      coord_flip()
+    
+    QCplot_name <- paste0('QCplot_',markers)
+    assign(QCplot_name, QCplot)
+    print(QCplot)
+    ggsave(paste0('./mgpQC_',markers, "/QC_", markers, "_plot", ".png"))
+}
+```
+We can see we don't have many markers in the darmanis and lake sets, but let's get all the common marker genes anyways and plot again.
+```{r echo=FALSE, cache=FALSE, comment=FALSE, message=FALSE}
+commonMarkerList <-function(markers, cohort_num){
+    for (cell in names((markers))){
+        cell_list <- all_cohorts_QC %>% filter(celltype == cell)
+        start <- 1
+        for(i in cohort_num){
+          if(i == cohort_num[1]){
+            markers1 <- unlist(strsplit(cell_list[i,2], ","))
+            markers1 <- str_replace_all(string=markers1, pattern=" ", repl="")
+            markers2 <- unlist(strsplit(cell_list[i,2], ","))
+            markers2 <- str_replace_all(string=markers2, pattern=" ", repl="")
+            common_markers <- intersect(markers1, markers2)
+          }
+          if(i > cohort_num[2] ){
+            markersn <- unlist(strsplit(cell_list[i,2], ","))
+            markersn <- str_replace_all(string=markersn, pattern=" ", repl="")
+            common_markers <-intersect(common_markers, markersn)
+          }
+        }
+        celltype_name <- eval(cell)
+        celltype_name <- make.names(celltype_name)
+        assign(celltype_name, common_markers)
+        #only take cell types with more than 2 markers
+        #if(length(common_markers) > 2){
+        final_common_markers <- list(final_common_markers, cell = get(celltype_name))
+        names(final_common_markers) <- c('', eval(cell))
+          
+       # }
+    }
+    return(final_common_markers)
+  
+}
+marker_lists <- c("subclass_CgG_MTG", "lake", "darmanis")
+for(markers in marker_lists){
+    final_common_markers <- list()
+    print(markers)
+    all_cohorts_QC <- readRDS(paste0('./mgpQC_',markers, "/all_cohorts_QC.rds"))
+    curr_markers <- get(markers)
+    final_common_markers <- commonMarkerList(curr_markers, 1:6)
+    final_common_markers <- list.flatten(final_common_markers, 
+                                             use.names = TRUE, classes= "ANY")
+    assign(paste0(markers, "_common_final"), final_common_markers)
+    saveRDS(final_common_markers, paste0('./commonMarkerLists/',markers, "_common_final.rds"))
+}
+```
+Now that we've got the common list among the relevant cohorts, let's plot.
+```{r echo=FALSE, cache=FALSE, comment=FALSE, warning=FALSE}
+marker_lists <- c("subclass_CgG_MTG", "lake", "darmanis")
+for(markers in marker_lists){
+    print(markers)
+    list_name <- paste0('./commonMarkerLists/', markers, "_common_final.rds")
+    common_markers <- readRDS(list_name)
+    
+    for(i in 1:length(common_markers)){
+      if( i== 1){
+        common_markers_df <- data.frame(celltype =names(common_markers)[i],
+                         num_markers= length(common_markers[[i]]))
+      }
+      else{
+        df <- data.frame(celltype =names(common_markers)[i],
+                         num_markers= length(common_markers[[i]]))
+        common_markers_df <- rbind(common_markers_df, df)
+      }
+    }
+    
+    markerplot <- common_markers_df %>%  ggplot(aes(x = celltype, y = num_markers)) +
+      theme_minimal() +
+      geom_bar(stat = "identity", fill = "#e0abf5") +
+      ggtitle(paste0("Plot of Number of Markers Per Celltype \n Available Across All Datasets for ", markers, " Marker List")) +
+      theme(axis.text.x = element_text(angle = 45, vjust = 0.5),
+            axis.title.x = element_text('Cell Type'),
+            axis.title.y = element_text('Markers Used')) +
+      coord_flip()
+    
+    markerplot_name <- paste0('marker_plot_',markers)
+    assign(markerplot_name, markerplot)
+    print(markerplot)
+    ggsave(paste0("./commonMarkerLists/common_", markers, "_plot", ".png"))
+}
+```
+We lost too many markers in darmanis & lake for those common lists to be useful marker lists, so we'll stick to using the darmanis and lake marker lists but now use "common_final" and "subclass_CgG_MTG_common_final"  as our new marker lists to run the MGP algorithm. This will encourage comparability across cohorts of our results and allow us to perform mega-analysis of the rCTPs across the cohorts/brain regions.
+Let's run the MGP algorithm with our marker lists.
+```{r}
+mgpCalc<-function(count_df, meta_df, markers){
+  # calculate MGPs per sample
+  estimations_human_markers<- mgpEstimate(exprData=count_df,
+                                          genes=markers,
+                                          geneColName="Gene",
+                                          outlierSampleRemove=F, # should outlier samples removed. This is done using boxplot stats.
+                                          geneTransform = NULL,
+                                          #function(x){homologene::mouse2human(x)$humanGene}, # this is the default option for geneTransform
+                                          groups=NULL, #if there are experimental groups provide them here. if not desired set to NULL
+                                          seekConsensus = FALSE, # ensures gene rotations are positive in both of the groups
+                                          removeMinority = TRUE)
+  mgp_info <- list("mgp_df"= count_df, "estimations_human_markers" = estimations_human_markers)
+  estimations_human_markers <- mgp_info$estimations_human_markers
+  
+  # matrix of mgp estimates per cell type, column name SST stores SST MGPs
+  mgp_est <- estimations_human_markers$estimates %>% as.data.frame() 
+  colnames(mgp_est) <- names(markers)
+  mgp_est <- mgp_est %>% tibble::rownames_to_column(var = 'projid')
+  
+  # merge mgp data frame with sample metadata data frame
+  mgp_est = merge(meta_df, mgp_est, by = 'projid')
+  return(mgp_est)
+}
+#cohort can be ROSMAP, MAYO, MSBBBM10, MSBBBM22, MSBBBM26, MSBBBM44
+mgpsForAMPAD<-function(cohort, markers){
+  if(cohort == "ROSMAP"){
+    covars <- c("sex","age_death")
+    #get metadata
+    pheno_df <- readRDS("./cohortMetadata/ROSmasterCOMPLETE.rds")
+    }
+  else{
+    covars <- c("msex","AgeAtDeath")
+    v_name <-  paste0("v_", cohort)
+    voom <- readRDS(paste0("./QCpipelineResults/" , v_name, ".rds"))
+    assign(v_name, voom)
+    pheno_df <- voom$targets
+    if(cohort == "MAYO"){
+      pheno_df<- pheno_df %>% 
+        dplyr::rename(
+          projid = SampleID,
+        )
+    }
+    else{
+      pheno_df<- pheno_df %>% 
+       dplyr::rename(
+          projid = sampleIdentifier,
+        )
+    }
+  }
+  count_df_name <- paste0(cohort, "_count_df")
+  mgp_result <- mgpCalc(get(count_df_name), pheno_df, markers)
+  model.data <- mgp_result
+  
+  return(list("model" = model.data, "covars" = covars))
+}
+
+cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
+marker_lists <- c("subclass_CgG_MTG_common_final", "lake", "darmanis")
+for(markers in marker_lists){
+  print(markers)
+  for(cohort in cohorts){
+    mgp_result <- mgpsForAMPAD(cohort, get(markers))
+    mgp_name <- paste0("mgp_",cohort)
+    print(mgp_name)
+    assign(mgp_name, mgp_result)
+    folder_name <- gsub('_common_final', '', markers)
+    saveRDS(get(mgp_name), paste0( './mgpResults_',folder_name, "/", mgp_name, ".rds"))
+  }
+}
+```
+Now we've calculated MGPs for each of the cohorts and each of the common marker gene lists. We want to Z-score these MGPs so we can compare them in a mega-analysis within each marker gene list.
+```{r}
+cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
+marker_lists <- c("subclass_CgG_MTG_common_final", "lake", "darmanis")
+#Z score mgps per subject
+for(markers in marker_lists){
+  folder_name <- gsub('_common_final', '', markers)
+  for(cohort in cohorts){
+    mgp_name <- paste0("mgp_",cohort)
+    mgp <- readRDS(paste0('./mgpResults_',folder_name, "/", mgp_name, ".rds"))
+    mgp_df <- mgp$model
+    markers_mgp <- get(markers)
+    for(cell in names(markers_mgp)){
+      mgp_df[,cell] <- as.numeric(scale(mgp_df[,cell], center = TRUE, scale = TRUE))
+    }
+    mgp_ZScored_name <- paste0(mgp_name, "_ZScored")
+    assign(mgp_ZScored_name, mgp_df)
+    saveRDS(get(mgp_ZScored_name), paste0('./mgpResults_',folder_name, "/", mgp_ZScored_name, ".rds"))
+  }
+}
+```
+
+Now that we've Z scored all the MGPs, we can move onto our mega-analysis. Before we do though let's use our common marker lists to determine how each of the genes that define the cell-types are behaving relative to AD diagnosis, i.e. is there a strong unidirectional association between all of the genes in a cell-type and AD diagnosis?
+Now that we've Z scored all the MGPs, we can move onto our mega-analysis. Before we do though let's do two things.
+
+1. Let's get the QC metrics of our MGPs using our new marker lists.
+
+2. Let's use our common marker lists to determine how each of the genes that define the cell-types are behaving relative to AD diagnosis, i.e. is there a strong unidirectional association between all of the genes in a cell-type and AD diagnosis?
+
+
+So to address point 1:
+```{r}
+#we define our QC algorithm such that it returns a dataframe with the cell type, markers_used (list of marker genes used ' per cell type), removed_marker_ratios (list of removed marker ratios per cell type) and percent_variance_PC1 (list of variance explained by the first PC per cell type)
+mgpQCMetrics <-function(count_df, mgp_markers){
+  
+  if(!all(c("Gene") %in% colnames(count_df))){
+    stop("The count_df argument must be a df with a column named Gene (HGNC gene symbols)")
+  }
+  mgp_est<- markerGeneProfile::mgpEstimate(exprData=count_df,
+                                                  genes=mgp_markers,
+                                                  geneColName="Gene",
+                                                  outlierSampleRemove=F, # should outlier samples removed. This is done using boxplot stats.
+                                                  geneTransform =NULL, #function(x){homologene::mouse2human(x)$humanGene}, # this is the default option for geneTransform
+                                                  groups=NULL, #if there are experimental groups provide them here. if not desired set to NULL
+                                                  seekConsensus = FALSE, # ensures gene rotations are positive in both of the groups
+                                                  removeMinority = TRUE)
+  i= 0
+  for(cell in names(mgp_markers)){
+    i = i + 1
+    cells_df <- mgp_est$usedMarkerExpression[i] %>% as.data.frame()
+    masterlist <- paste0(rownames(cells_df), collapse=', ')
+    num_markers <- length(rownames(cells_df))
+    rm_marker_ratios <- mgp_est$removedMarkerRatios[i]
+    if(!is.null(mgp_est$trimmedPCAs[[i]])){
+      percent_variance <- ((summary(mgp_est$trimmedPCAs[[i]]))[6]) %>% as.data.frame()
+      percent_variance_PC1 <- percent_variance[2,1]
+    }
+    else{
+      percent_variance_PC1 <- NA
+    }
+    if(i==1){
+      master_df <- data.frame( "markers_used" = masterlist, 
+                        "removed_marker_ratios" = rm_marker_ratios,
+                        "percent_variance_PC1" = percent_variance_PC1, 
+                        "num_markers" = num_markers)  
+    }
+    else{
+      df <- data.frame( "markers_used" = masterlist, 
+                        "removed_marker_ratios" = rm_marker_ratios,
+                        "percent_variance_PC1" = percent_variance_PC1, 
+                        "num_markers" = num_markers)
+      master_df <- rbind(master_df, df)
+    }
+  }
+  master_df <- tibble::rownames_to_column(master_df, var = "celltype")
+  return(master_df)
+}
+#calculate QC metrics for each common  marker gene list for each cohort
+cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
+marker_lists <- c("subclass_CgG_MTG_common_final", "lake", "darmanis")
+for(markers in marker_lists){
+  folder_name <- gsub('_common_final', '', markers)
+  for(cohort in cohorts){
+    if(str_detect(cohort, "MSBB")){
+      cohort <- gsub('MSBB', '', cohort) 
+    }
+    print(cohort)
+    df_name <- paste0(cohort, "_count_df")
+    mgpResult <- mgpQCMetrics(get(df_name), mgp_markers = get(markers))
+    mgpResult$cohort <- cohort
+    mgpName <- paste0("mgpQCResults",cohort, markers)
+    assign(mgpName, mgpResult)
+    saveRDS(get(mgpName), paste0('./mgpQC_',folder_name, '/', mgpName, "_common.rds"))
+    print(mgpName)
+    assign(mgpName, mgpResult)
+    if(cohort =="ROSMAP"){
+      all_cohorts_QC <- mgpResult
+    }
+    else{
+      all_cohorts_QC <-rbind(all_cohorts_QC, mgpResult)
+    }
+  }
+  all_cohorts_QC$cohort <- factor(all_cohorts_QC$cohort, levels = c("ROSMAP", "BM10", "BM44", "BM22", "BM36", "MAYO"))
+  all_cohorts_QC <- arrange(all_cohorts_QC, cohort)
+  if(markers == "subclass_CgG_MTG_common_final"){
+    print(kable(data.frame("celltype" = all_cohorts_QC$celltype, "PC1 variance" = all_cohorts_QC$percent_variance_PC1, "cohort" = all_cohorts_QC$cohort), align = "lccrr"))
+  }
+  saveRDS(all_cohorts_QC, paste0('./mgpQC_',folder_name, "/all_cohorts_QC_common.rds"))
+}
+```
+
+
+Now let's address point 2. 
+```{r}
+frenchFryPlot<-function(AD_coef, AD_pval, marker_list, cohort){
+  
+  
+  pathology_df <- AD_pval
+  
+  marker_df <-  data.frame(unlist(marker_list, use.names=F),rep(names(marker_list),
+                                                                lengths(marker_list)))
+  colnames(marker_df) <- c("marker", "celltype")
+  for (marker in names(marker_list)){
+    df <- pathology_df %>% filter(marker == marker)
+    if (marker == names(marker_list)[1]){
+      result <- df
+    }
+    else{
+      result <- rbind(result, df)
+    }
+  }
+  
+  final_result <- merge(result, AD_coef, by="gene")
+  final_result$signedP <- -log10(final_result$pval) *(sign(final_result$coef))
+  
+  merge_markers<- marker_df %>% dplyr::rename( gene = marker)
+  final_result <- merge(merge_markers, final_result)
+  final_result$cohort <- c(cohort)
+  return(unique(final_result))
+  
+}
+cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
+marker_lists <- c("subclass_CgG_MTG_common_final")
+gene_anno <- readRDS("./geneAnno/gene_anno.rds")
+for (markers in marker_lists){
+  for(cohort in cohorts){
+    markers_for_plot <- get(markers)
+    print(cohort)
+    lmod_name <-  paste0("lmod_" ,cohort)
+    
+    filename <- paste0('./cohortQCMods/', lmod_name, ".rds")
+    lmod <- readRDS(filename)
+    assign(lmod_name, lmod)
+    eb <- eBayes(lmod,robust = T)
+    
+    if(cohort == "ROSMAP"){
+      n=11
+    }
+    if(cohort == "MAYO"){
+      n=24
+    }
+    if(cohort == "BM10"){
+      n=18
+    }
+    if(cohort == "BM22"){
+      n=21
+    }
+    else if(cohort == "BM36" || cohort == "BM44"){
+      n=19
+    }
+    print(n)
+    gene_v_AD  <-lmod$coefficients[,c(n)]
+    gene_v_AD <- as.data.frame(gene_v_AD)
+    gene_v_AD <- tibble:: rownames_to_column(gene_v_AD, var="Gene")
+    
+    final_df <- merge(gene_v_AD, gene_anno)
+    final_df$new_gene<- final_df$Hgnc_Gene %>% make.names(unique = T) #this is ONE way of dealing with the duplicates, just making them into separate, unique names
+    #add new_gene column w/ Hgnc_Gene values filtered to have no duplicates
+    AD_coef <- final_df[,c(2,4)]
+    colnames(AD_coef) <- c("coef", "gene")
+    
+    coef_df <- AD_coef #dataframe with coefficient column and HGNC gene name column 
+    #get p values
+    p_geneAD <- eb$p.value
+    p_geneAD  <-p_geneAD[,c(n)]
+    p_geneAD <- as.data.frame(p_geneAD)
+    p_geneAD <- tibble:: rownames_to_column(p_geneAD, var="Gene")
+    final_df <- merge(p_geneAD, gene_anno)
+    new_gene <- final_df$Hgnc_Gene %>% make.names(unique = T) #this is ONE way of dealing with the duplicates, just making them into separate, unique names
+    #add new_gene column w/ Hgnc_Gene values filtered to have no duplicates
+    final_df$new_gene <- new_gene
+    AD_pval <- final_df[,c(2,4)]
+    colnames(AD_pval) <- c("pval", "gene")
+    
+    gene_pathology_association <- 
+      frenchFryPlot(AD_coef, AD_pval, cohort, marker_list =markers_for_plot)
+    assign(paste0("fry_plot", cohort), gene_pathology_association)
+  }
+  fry_df <- rbind(fry_plotROSMAP, fry_plotMAYO, fry_plotBM10,
+                  fry_plotBM22, fry_plotBM36, fry_plotBM44)
+  fry_df$fdr <- p.adjust(fry_df$pval, method="fdr")
+  fry_df$signedFDR <- -log10(fry_df$fdr) *(sign(fry_df$signedP))
+  fry_df$sig <- ifelse(fry_df$pval < 0.05, "#94C973", "#808080")
+  
+  for (cell in names((markers_for_plot))){
+    celltype_fry_df <- fry_df %>% filter(celltype == cell)
+    celltype_heat_map <- ggplot(celltype_fry_df, aes(cohort, gene, fill= signedP))+
+      theme_minimal() + geom_tile() + 
+      scale_fill_gradient2(low="darkblue", high="darkgreen", guide="colorbar") +   
+      ggtitle(paste0("Significance of \n" , cell, " ", markers , 
+                     "\n marker genes per cohort")) 
+    
+    celltype_french <- ggplot(celltype_fry_df, aes(x= gene,y= signedP))+
+      theme_minimal() + theme(axis.text.x = element_text(angle = 45)) +
+      geom_bar(stat="identity", fill = celltype_fry_df$sig)+ 
+      facet_wrap(~cohort, scales = 'free_x',nrow=6) + 
+      ggtitle(paste0("Significance of \n" , cell, " ", markers , 
+                     "\n marker genes per cohort"))
+    
+    celltype_heat_map
+    celltype_french
+    
+    heat_name <- paste0("heat_map",make.names(cell))
+    assign(heat_name, celltype_heat_map)
+    print(get(heat_name))
+    saveRDS(get(heat_name), paste0('./frenchHeat/', heat_name, ".rds"))
+    ggsave(paste0('./frenchHeat/', heat_name, markers, "_plot", ".png"), width = 15, height = 12)
+    
+    french_name <- paste0("french_fry",make.names(cell))
+    assign(french_name, celltype_french)
+    print(get(french_name))
+    saveRDS(get(french_name), paste0('./frenchHeat/', french_name, ".rds"))
+    ggsave(paste0('./frenchHeat/', french_name, markers, "_plot", ".png"), width = 15, height = 20)
+    
+  }
+}
+```
