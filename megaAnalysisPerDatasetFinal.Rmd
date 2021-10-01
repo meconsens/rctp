@@ -1,0 +1,803 @@
+---
+title: "Mega-Analysis per dataset markers - FINAL"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r echo=FALSE, cache=FALSE, comment=FALSE, warning=FALSE}
+#load necessary libraries
+library(magrittr)
+library(tidyverse)
+library(ggplot2)
+library(ggrepel)
+library(limma)
+library(edgeR)
+library(rms)
+library(useful)
+library(stringr)
+library(markerGeneProfile)
+library(rlist)
+library(lme4)
+library(ggthemes)
+library(ggsci)
+library(ggpubr)
+library(ggbeeswarm)
+library(cowplot)
+```
+
+
+Now that we've loaded in the libraries lets get the marker lists we need.
+
+```{r}
+marker_lists <- c("subclass_CgG_MTG")
+cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
+for(marker in marker_lists){
+  for(cohort in cohorts){
+    marker_list_name <- paste0(marker, "_", cohort)
+    setwd('./commonMarkerLists')
+    markers <- readRDS(paste0(marker_list_name, ".rds"))
+    assign(marker_list_name, markers)
+    setwd('../')
+  }
+}
+```
+
+We're going to create a dataframe for mega-analysis for each of the marker gene lists, which will contain all the relative cell-type proportion estimates (rCTPs) calculated for each subject in each of the cohorts with the given marker gene lists, as well as their sample identifier (projid), their age at death, their sex and their alzheimer's diagnosis. 
+
+We've been treating each of the brain regions thus far as separate cohorts, i.e. that there is a ROSMAP, MAYO, BM10, BM22, BM36 and BM44 cohort, but the truth is the Mount Sinai cohort contains the BM10, BM22, BM36 and BM44 cohorts. This means there is overlap in subjects between these four "cohorts", i.e. that a subject *X* may have bulk-tissue RNA-seq data sampled from BM10 and BM22, and therefore these readings are not independent, as they're confounded by being from the same subject, *X*.
+
+As of now we've been using unique identifiers in the Mount Sinai cohorts for each brain region, but we want to rename the identifiers so we can be aware of which subjects have multiple regions sampled. This way we can account for the repetition of subjects in our mega-analysis. We're going to convert the IDs to no longer be unique across all brain regions, but to allow for us to perceive subject re-sampling when we create our mega-analysis dataframes.
+
+```{r}
+cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
+marker_lists <- c("subclass_CgG_MTG")
+
+setwd('./rawCohortData')
+BMidsAcross <- readRDS("allMSBBIDs.rds")
+setwd('../')
+BMidsAcross <- BMidsAcross %>% 
+  dplyr::rename(
+    projid = sampleIdentifier
+  )
+    
+    
+for(markers in marker_lists){
+  print(markers)
+  for(cohort in cohorts){
+    print(cohort)
+    mgp_name <- paste0("mgp_",cohort)
+    setwd(paste0('./mgpResultsperDataset_',markers))
+    mgp_ZScored_name <- paste0(mgp_name, "_ZScored")
+    mgp_Z_df <- readRDS(paste0(mgp_ZScored_name, ".rds"))
+    assign(mgp_ZScored_name, mgp_Z_df )
+    setwd('../')
+    final_markers <- paste0(markers, "_", cohort)
+    cell_types <- names(get(final_markers))
+    if(cohort == "ROSMAP"){
+      mgp_Z_df <- mgp_Z_df %>% dplyr::mutate(Diagnosis = 
+                                               case_when( (braaksc >= 4 & ceradsc <= 2 & cogdx == 4) 
+                                                          ~ 'AD',
+                                                          (braaksc <= 3 & ceradsc >= 3 & cogdx == 1) 
+                                                          ~ 'C',
+                                                      TRUE ~ 'OTHER'))
+      mgp_Z_df <- mgp_Z_df %>% dplyr::filter(Diagnosis != "OTHER")
+      mgp_Z_df$LOAD <- factor(ifelse(mgp_Z_df$Diagnosis=="AD",1,0))
+      mgp_Z_df <- mgp_Z_df %>% 
+        dplyr::rename(
+            AgeAtDeath = age_death
+          )
+    }
+    mgp_Z_df <- mgp_Z_df %>% dplyr::select(cell_types, "projid", "msex", "LOAD", "AgeAtDeath")
+    mgp_Z_df$cohort <- cohort
+    if(cohort == "ROSMAP"){
+      mega_mgp <- mgp_Z_df
+    }
+    else{
+      mega_mgp <- rbind(mega_mgp, mgp_Z_df)
+    }
+  }
+  #getting overlapping identifiers for BM cohorts
+  BMidsAcross <- BMidsAcross[!duplicated(BMidsAcross),]
+  MGPsBM <- mega_mgp %>% dplyr::filter(str_detect(cohort, "BM"))
+  allBMs <- merge(MGPsBM, BMidsAcross)
+  allBMs <- allBMs[,-1]
+  allBMs <- allBMs%>% dplyr::select(individualIdentifier,everything())
+  allBMs <- allBMs %>% 
+    dplyr::rename(
+      projid = individualIdentifier
+    )
+  mega_mgp <- mega_mgp %>% dplyr::filter(!str_detect(cohort, "BM"))
+  mega_mgp <- rbind(mega_mgp, allBMs)
+  
+  #save mega_mgp
+  setwd(paste0('./mgpResultsperDataset_',markers))
+  saveRDS(mega_mgp, paste0("megaMGP_", markers, ".rds"))
+  assign(paste0("megaMGP_", markers), mega_mgp)
+  setwd('../')
+}
+```
+
+Now we have all the dataframes we need for the mega-analysis. Before we do it, let's plot the results of each celltypes association with LOAD. 
+```{r}
+marker_lists <- c("subclass_CgG_MTG")
+
+    
+for(markers in marker_lists){
+  print(markers)
+  for(cohort in cohorts){
+ 
+    setwd(paste0('./mgpResultsperDataset_',markers))
+    mega_mgp <- readRDS(paste0("megaMGP_", markers, ".rds"))
+    assign(paste0("megaMGP_", markers), mega_mgp)
+    setwd('../')
+    covars <- c("msex", "AgeAtDeath")
+    colnames(mega_mgp) <- make.names(colnames(mega_mgp))
+    cohort_name <- cohort
+    mega_mgp_cohort <- mega_mgp %>% dplyr::filter(cohort== cohort_name)
+    cell_types <- make.names(names(get(paste0(markers, "_", cohort))))
+    pathology <- ("LOAD")
+    model.data <- mega_mgp_cohort
+    
+    results <- sapply(cell_types,function(celltype) {
+      sapply(pathology, function(pathology) {
+        
+        form <- as.formula(paste0(celltype,"~",pathology," + ",paste0(covars,collapse=" + "))) 
+        model <- lm(data=model.data,form)
+        p <- anova(model)[pathology,5]
+        beta <- coef(model)[2]
+        n <- nrow(model$model)
+        
+        return(c(celltype,pathology,beta, p,n))
+        
+      })
+    })
+    
+    results <- as.data.frame(matrix(results,ncol=5,byrow = T),stringsAsFactors = F)
+    names(results) <- c("celltype","pathology","beta","p","n")
+    
+    results <- within(results,{
+                      p <- as.numeric(p)
+                      beta <- as.numeric(beta)
+                      n <- as.numeric(n)})
+    
+    results$bonfp <- p.adjust(results$p, method="bonferroni")
+    results$fdr <- p.adjust(results$p, method="fdr")
+    results$signedFDR <- -log10(results$fdr) *(sign(results$beta))
+    
+    #add the *** label for significant vs. not significant
+    annotation_label_mega <- results
+    annotation_label_mega$mark <- ifelse(annotation_label_mega$bonf <0.05,"***", "")
+    
+    results$cohort <- cohort_name
+    
+    if(cohort_name == cohorts[1]){
+      final_results <- results
+    }
+    else{
+      final_results <- rbind(final_results, results)
+    }
+    
+    mega_analysis_plot_cohort = results %>% 
+    ggplot(aes(x = celltype, y = beta)) + 
+    geom_hline(yintercept = 0) + 
+    geom_bar(stat = "identity", show.legend = FALSE) + 
+    ylab('LOAD (Beta)') + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+    ggtitle(paste0("Mega Analysis Results for ", cohort)) +
+    geom_text(x = annotation_label_mega$celltype,  y = 0.22, 
+              label = annotation_label_mega$mark, 
+              colour = "black", size=6)
+    
+    print(mega_analysis_plot_cohort)
+
+  }  
+  
+  sig_res <- subset(final_results,p<0.05)
+  pdf(file = paste0('./mgpResultsperDataset_',markers, "/eachMGPassociation.pdf"),   # The directory you want to save the file in
+    width = 18, # The width of the plot in inches
+    height = 6) # The height of the plot in inches
+
+  heatmap <- ggplot(final_results, aes(celltype, cohort, fill= beta))+
+    theme_minimal() + geom_tile() + 
+    scale_fill_gradient2(low="darkblue", high="darkgreen", guide="colorbar") + 
+    geom_text(data=sig_res, aes(label= formatC(fdr, format = "e", digits = 2)), color ="black") +
+    theme_minimal() +    
+    theme(axis.title.y=element_blank(),
+          axis.title.x=element_blank(),
+          axis.ticks.y=element_blank(),
+          axis.text.x = element_text(angle = 90),
+          axis.ticks.x=element_blank()) 
+  print(heatmap)
+  dev.off()
+}
+```
+
+We will now run the mega-analysis.
+
+```{r}
+marker_lists <- c("subclass_CgG_MTG")
+
+    
+for(markers in marker_lists){
+  print(markers)
+  
+ 
+  setwd(paste0('./mgpResultsperDataset_',markers))
+  mega_mgp <- readRDS(paste0("megaMGP_", markers, ".rds"))
+  assign(paste0("megaMGP_", markers), mega_mgp)
+  setwd('../')
+  covars <- c("msex", "AgeAtDeath")
+  colnames(mega_mgp) <- make.names(colnames(mega_mgp))
+  cell_types <- make.names(names(get(paste0(markers, "_ROSMAP"))))
+  pathology <- ("LOAD")
+  model.data <- mega_mgp
+  
+  LOAD_results <- sapply(cell_types,function(celltype) {
+    sapply(pathology, function(pathology) {
+      print(celltype)
+      form <- as.formula(paste0(celltype,"~",pathology," + ", "(1 | projid )" ,
+                                  " + ", "cohort" , " + ",  paste0(covars,collapse=" + "))) 
+      model <- lmer(data=model.data,form)
+      return(model)
+    })
+  })
+  
+  results <- sapply(cell_types,function(celltype) {
+      print(celltype)
+      form <- as.formula(paste0(celltype,"~" ," + ", "(1 | projid )" ," + ", "cohort" , 
+                                   " +", paste0(covars,collapse=" + "))) 
+      model2 <- lmer(data=model.data,form)
+      return(model2)
+    })
+  
+  for(cell in cell_types){
+    mod1Name <- paste0(cell, ".LOAD")
+    mod2Name <- cell
+    print(mod1Name)
+    print(mod2Name)
+    significance <- (anova(LOAD_results[mod1Name][[1]], results[mod2Name][[1]]))$`Pr(>Chisq)`[2]
+    confInt <- confint(LOAD_results[mod1Name][[1]],level = 0.95,  oldNames=FALSE)
+    upperBound <- confInt[4,2]
+    lowerBound <- confInt[4,1]
+    
+    if(cell == cell_types[1]){
+     celltype_sig <- data.frame("celltype"=cell, significance, "beta" = coef(summary(LOAD_results[mod1Name][[1]]))[2,1], "std.err" = coef(summary(LOAD_results[mod1Name][[1]]))[2,2] ,
+                                        "lowerBound" = lowerBound, "upperBound" = upperBound)
+    }
+    else{
+      temp <- data.frame("celltype"=cell, significance, "beta" = coef(summary(LOAD_results[mod1Name][[1]]))[2,1], "std.err" = coef(summary(LOAD_results[mod1Name][[1]]))[2,2],
+                         "lowerBound" = lowerBound, "upperBound" = upperBound)
+      celltype_sig <- rbind(celltype_sig, temp)
+    }
+  }
+  
+  celltype_sig$fdr <- p.adjust(celltype_sig$significance, method="fdr")
+  celltype_sig$bonf <- p.adjust(celltype_sig$significance, method="bonferroni")
+  celltype_sig$SIG <- celltype_sig$fdr <0.05
+  celltype_sig$SIGBONF <- celltype_sig$bonf <0.05
+  
+  
+  setwd('./megaResults')
+  saveRDS(celltype_sig, paste0("mega_results_", markers, ".rds"))
+  assign(paste0("mega_results_", markers), celltype_sig)
+  setwd('../')
+  
+  
+  mega_mgp_res <- mega_mgp
+  for(celltype in cell_types){
+    form <- as.formula(paste0(celltype,"~", "(1 | projid )" ," + ", "cohort" , " + ",  paste0(covars,collapse=" + "))) 
+    model <- lmer(data=model.data,form)
+    cell_type_residual <- data.frame(resid(model))
+    mega_mgp_res[paste0(celltype, "LOADResid")] <- cell_type_residual
+  }
+  
+  #save the residuals 
+  setwd(paste0('./mgpResultsperDataset_',markers))
+  assign(paste0("mega_mgp_res", markers),mega_mgp_res)
+  saveRDS(mega_mgp_res, "mega_mgp_res.rds")
+  write.csv(mega_mgp_res,'mega_mgp_res.csv')
+  setwd('../')
+}
+  
+```
+
+We've calculated the significance of the association between each of the cell-types and the AD diagnosis variable (LOAD) in a mega-analyis. We can now plot the results.
+
+```{r}
+marker_lists <- c("subclass_CgG_MTG")
+
+setwd('./subclassMeta')
+subclass_meta <- read.csv('subclass_meta.txt')
+setwd('../')
+    
+for(markers in marker_lists){
+  print(markers)
+  
+  setwd('./megaResults')
+  mega_mgp_results <- readRDS(paste0("mega_results_", markers, ".rds"))
+  assign(paste0("mega_results_", markers), mega_mgp_results)
+  setwd('../')
+  
+  
+  
+  
+  #if(!(str_detect(markers, "subclass_new")) && str_detect(markers, "subclass")){
+     # mega_mgp_results <- mega_mgp_results %>% rename(subclass = celltype)
+      #subclass_meta$AIBS_subclass_label <- make.names(subclass_meta$AIBS_subclass_label)
+    #  all_beta_mega = merge(mega_mgp_results,
+     #                 subclass_meta, by.x = 'subclass', by.y = 'AIBS_subclass_label')
+     # all_beta_mega$class <- as.factor(all_beta_mega$AIBS_class_label)
+    #  all_beta_mega$class <- factor(all_beta_mega$AIBS_class_label, 
+    #                            levels = c("GABAergic", "Glutamatergic", 
+     #                                                           "Non-neuronal"))
+    #  all_beta_mega <- arrange(all_beta_mega, class)
+  #}
+ # else{
+    all_beta_mega = mega_mgp_results
+ # }
+  all_beta_mega$ub = all_beta_mega$beta + all_beta_mega$std.err
+  all_beta_mega$lb = all_beta_mega$beta - all_beta_mega$std.err
+  
+  
+  
+  
+  
+  #add the *** label for significant vs. not significant
+  annotation_label_mega <- all_beta_mega
+  annotation_label_mega$mark <- ifelse(annotation_label_mega$bonf <0.05,"***", "")
+  
+  
+  
+  my_colours = c('blue', 'grey', 'red', 'green', 'yellow', 'purple') 
+  #if(!(str_detect(markers, "subclass_new")) && str_detect(markers, "subclass")){
+    #mega_analysis_plot = all_beta_mega %>% 
+    #ggplot(aes(x = subclass, y = beta,fill = AIBS_class_color)) + theme_minimal()+
+    #geom_hline(yintercept = 0) + 
+    #geom_bar(stat = "identity", show.legend = FALSE) + 
+    #scale_fill_manual(values = my_colours) + 
+    #facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
+    #geom_errorbar(aes(ymin = lb, ymax = ub), width = .33) + 
+    #ylab('LOAD (Beta)') + 
+    #theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 15),
+     #     strip.text.x = element_text(size = 15))+
+    #ggtitle(paste0("Mega Analysis Results for ", folder_name, " Marker List")) +
+    #geom_text(x = annotation_label_mega$subclass,  y = 0.3, 
+    #          label = annotation_label_mega$mark, 
+    #          colour = "black", size=6)+
+  #scale_fill_brewer(palette="BuPu")
+   
+  #}
+  #else{
+    mega_analysis_plot = all_beta_mega %>% 
+    ggplot(aes(x = celltype, y = beta)) + 
+    geom_hline(yintercept = 0) + 
+    geom_bar(stat = "identity", show.legend = FALSE) + 
+    scale_fill_manual(values = my_colours) + 
+    geom_errorbar(aes(ymin = lb, ymax = ub), width = .33) + 
+    ylab('LOAD (Beta)') + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+    ggtitle(paste0("Mega Analysis Results for ", markers, " Marker List")) +
+    geom_text(x = annotation_label_mega$celltype,  y = 0.3, 
+              label = annotation_label_mega$mark, 
+              colour = "black", size=6)
+  #}
+  setwd('./megaResults')
+  pdf(file = paste0("mega_analysis_", markers, "_plot", ".pdf"), 
+    width = 21, # The width of the plot in inches
+    height = 14)
+  print(mega_analysis_plot)
+  dev.off()
+  print(mega_analysis_plot)
+  setwd('../')
+}
+```
+
+
+Let's create case/control box plots for SST and IT rCTP residuals so we can see if there's a difference in cell type proportion changes across cohorts/brain regions.
+```{r}
+cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
+marker_lists <- c("subclass_CgG_MTG")
+    
+for(markers in marker_lists){
+  print(markers)
+  folder_name <- markers
+  full_res_indiv <- data.frame()
+  full_sig_indiv <- data.frame()
+  for(cohort in cohorts){
+    print(cohort)
+    mgp_name <- paste0("mgp_",cohort)
+    setwd(paste0('./mgpResultsperDataset_',markers))
+    mgp_ZScored_name <- paste0(mgp_name, "_ZScored")
+    mgp_Z_df <- readRDS(paste0(mgp_ZScored_name, ".rds"))
+    assign(mgp_ZScored_name, mgp_Z_df )
+    setwd('../')
+    final_markers <- paste0(markers, "_", cohort)
+    cell_types <- make.names(names(get(final_markers)))
+    colnames(mgp_Z_df) <- make.names(colnames(mgp_Z_df))
+    if(cohort == "ROSMAP"){
+      mgp_Z_df <- mgp_Z_df %>% dplyr::mutate(Diagnosis = 
+                                               case_when( (braaksc >= 4 & ceradsc <= 2 & cogdx == 4) 
+                                                          ~ 'AD',
+                                                          (braaksc <= 3 & ceradsc >= 3 & cogdx == 1) 
+                                                          ~ 'C',
+                                                      TRUE ~ 'OTHER'))
+      mgp_Z_df <- mgp_Z_df %>% dplyr::filter(Diagnosis != "OTHER")
+      mgp_Z_df$LOAD <- factor(ifelse(mgp_Z_df$Diagnosis=="AD",1,0))
+      mgp_Z_df <- mgp_Z_df %>% 
+        dplyr::rename(
+            AgeAtDeath = age_death
+          )
+    }
+    mgp_Z_df <- mgp_Z_df %>% dplyr::select(cell_types, "projid", "msex", "LOAD", "AgeAtDeath")
+    mgp_Z_df$cohort <- cohort
+    pathology <- "LOAD"
+    covars <- c("msex", "AgeAtDeath")
+    model.data <- mgp_Z_df
+    i=0
+    for(celltype in cell_types){
+      form <- as.formula(paste0(celltype,"~",paste0(covars,collapse=" + "))) 
+      model <- lm(data=model.data,form)
+      celltype_residual <- data.frame(resid(model))
+      
+      model.data[paste0(celltype, "LOADResid")] <- celltype_residual
+      model.data$cohort <- cohort
+      
+      form <- as.formula(paste0(celltype,"~",pathology," + ",paste0(covars,collapse=" + "))) 
+      model <- lm(data=model.data,form)
+      loadp <- (coef(summary(model))[2,4])
+      
+      
+      if(i==0){
+        sig_results <- data.frame("celltype"= celltype, 
+                                  "cohort" = cohort, "significance" = loadp)
+      }
+      else{
+        sig_results_curr <- data.frame("celltype"= celltype, 
+                                       "cohort" = cohort, "significance" = loadp)
+        sig_results <- rbind(sig_results, sig_results_curr)
+      }
+      i= i+1
+    }
+    cell_type_resids <- paste(cell_types, "LOADResid", sep="")
+    full_res_indiv <- rbind(full_res_indiv, model.data[, c(cell_type_resids, "projid", "cohort", "LOAD")])
+    full_sig_indiv <- rbind(full_sig_indiv, sig_results)
+    
+    
+  }
+  
+  
+  full_res_indiv$Diagnosis <- (ifelse(full_res_indiv$LOAD == 1, "AD","C"))
+  full_res_indiv$Diagnosis <- factor(full_res_indiv$Diagnosis, levels = c("C", "AD"))
+  
+  setwd(paste0('./mgpResultsPerDataset_',folder_name))
+  saveRDS(full_res_indiv, paste0("full_res_", markers, ".rds"))
+  assign(paste0("full_res_", markers), full_res_indiv)
+  saveRDS(full_sig_indiv, paste0("full_sig_", markers, ".rds"))
+  assign(paste0("full_sig_", markers), full_sig_indiv)
+  setwd('../')
+}
+```
+
+Let's plot the case control boxplots now that we've calculated the residuals.
+```{r}
+marker_lists <- c("subclass_CgG_MTG_common_final")
+  print(markers)
+  folder_name <- markers
+  cell_types <- make.names(names(get(paste0(markers, "_ROSMAP"))))
+  setwd(paste0('./mgpResultsPerDataset_',folder_name))
+  full_res <- readRDS(paste0("full_res_", markers, ".rds"))
+  assign(paste0("full_res_", markers), full_res)
+  full_sig <- readRDS(paste0("full_sig_", markers, ".rds"))
+  assign(paste0("full_sig_", markers), full_sig)
+  setwd('../')
+  
+  full_res$cohort <- factor(full_res$cohort, levels = c("ROSMAP", "BM10", "BM44", "BM22", "BM36", "MAYO"))
+  full_res <- arrange(full_res, cohort)
+  
+  full_sig$cohort <- factor(full_sig$cohort, levels = c("ROSMAP", "BM10", "BM44", "BM22", "BM36", "MAYO"))
+  full_sig <- arrange(full_sig, cohort)
+  
+  #add the *** label for significant vs. not significant
+  annotation_label <- full_sig
+  annotation_label$bonf <- p.adjust(annotation_label$significance, method="bonferroni")
+  annotation_label$mark <- ifelse(annotation_label$significance <0.05,"*", "ns")
+
+  
+  for(cell in cell_types){
+    print(cell)
+    label_mark <- subset(annotation_label, celltype == cell)
+    data_text <- data.frame(
+      label = label_mark$mark,
+      cohort   = c("ROSMAP", "BM10", "BM44", "BM22", "BM36", "MAYO")
+    )
+    y_axis <- paste0(cell, "LOADResid")
+    boxplots <- full_res %>% 
+      ggplot(aes(x = Diagnosis, y = get(y_axis))) + theme_minimal()+
+      #geom_violin(alpha=0.4) + 
+      geom_quasirandom(size=0.6,shape=19,aes(col=Diagnosis),alpha=0.8) +
+      stat_summary(fun=mean,geom="point",aes(fill=Diagnosis),size=4,shape=23,col="black")+
+      scale_fill_brewer(palette="Set1")+
+      scale_color_brewer(palette="Set1")+
+      ggtitle(paste0(cell, ' rCTP residuals association with LOAD for ', markers))+
+      facet_wrap(~cohort, scales = 'free_x',nrow=1) + 
+      ylab(paste0(cell, ' rCTP residuals')) + 
+      xlab('')  + geom_text(
+      data    = data_text,
+      mapping = aes(x = 1, y = 3.5, label = label),
+      hjust   = -0.1,
+      vjust   = -1
+    )
+    assign(paste0(cell, "_boxplot_", markers), boxplots)
+    print(boxplots)
+    setwd('./caseControlPlots')
+    ggsave(paste0("case_control_", cell, "_", markers, "_boxplot", ".png"))
+    setwd('../')
+  }
+  
+  
+  
+```
+
+```{r}
+setwd('./subclassMeta')
+subclass_meta <- read.csv('subclass_meta.txt')
+setwd('../')
+markers <- "subclass_CgG_MTG"
+setwd(paste0('./mgpResultsPerDataset_',markers))
+full_res <- readRDS(paste0("full_res_", markers, ".rds"))
+assign(paste0("full_res_", "markers"), full_res)
+full_sig <- readRDS(paste0("full_sig_", markers, ".rds"))
+assign(paste0("full_sig_", markers), full_sig)
+setwd('../')
+
+cohort_name <- c("ROSMAP", "BM10", "BM44", "BM22", "BM36", "MAYO")
+full_res$cohort <- factor(full_res$cohort, levels = cohort_name)
+full_sig$cohort <- factor(full_sig$cohort, levels = cohort_name)
+  
+full_res <- arrange(full_res, cohort)
+full_sig <- arrange(full_sig, cohort)
+
+#add the *** label for significant vs. not significant
+annotation_label <- full_sig
+annotation_label$bonf <- p.adjust(annotation_label$significance, method="bonferroni")
+annotation_label$mark <- ifelse(annotation_label$significance <0.05,"*", "ns")
+
+
+#focus on SST and IT
+cell_types <- c("IT", "SST")
+  
+    
+    
+for(cell in cell_types){
+  if(cell == "SST"){
+    mark_height = 3.5
+  }
+  else{
+    mark_height = 2.5
+  }
+  print(cell)
+  label_mark <- subset(annotation_label, celltype == cell)
+  data_text <- data.frame(
+    label = label_mark$mark,
+    cohort   = cohort_name
+  )
+  y_axis <- paste0(cell, "LOADResid")
+  boxplots <- full_res %>% 
+    ggplot(aes(x = Diagnosis, y = get(y_axis))) + theme_minimal()+
+    geom_quasirandom(size=0.6,shape=19,aes(col=Diagnosis),alpha=0.8) +
+    stat_summary(fun=mean,geom="point",aes(fill=Diagnosis),size=4,shape=23,col="black")+
+    scale_fill_brewer(palette="Set1")+
+    scale_color_brewer(palette="Set1")+
+    ggtitle(paste0(cell, ' rCTP residuals association with LOAD for ', markers))+
+    facet_wrap(~cohort, scales = 'free_x',nrow=1) + 
+    ylab(paste0(cell, ' rCTP residuals')) + 
+    xlab('')  + geom_text(
+    data    = data_text,
+    mapping = aes(x = 1, y = mark_height, label = label),
+    hjust   = -0.1,
+    vjust   = -1
+  )
+  assign(paste0(cell, "_final_boxplots_", markers), boxplots)
+  print(boxplots)
+}
+#get mega analysis plot
+ setwd('./megaResults')
+  mega_mgp_results <- readRDS(paste0("mega_results_", markers, ".rds"))
+  assign(paste0("mega_results_", markers), mega_mgp_results)
+  setwd('../')
+  
+  
+  
+   
+  mega_mgp_results <- mega_mgp_results %>% rename(subclass = celltype)
+  subclass_meta$AIBS_subclass_label <- make.names(subclass_meta$AIBS_subclass_label)
+  all_beta_mega = merge(mega_mgp_results,
+                        subclass_meta, by.x = 'subclass', by.y = 'AIBS_subclass_label')
+  all_beta_mega$class <- as.factor(all_beta_mega$AIBS_class_label)
+  all_beta_mega$class <- factor(all_beta_mega$AIBS_class_label,
+                                levels = c("GABAergic", "Glutamatergic", 
+                                           "Non-neuronal"))
+  all_beta_mega <- arrange(all_beta_mega, class)
+  all_beta_mega$ub = all_beta_mega$beta + all_beta_mega$std.err
+  all_beta_mega$lb = all_beta_mega$beta - all_beta_mega$std.err
+  
+  
+  
+  
+  
+  #add the *** label for significant vs. not significant
+  annotation_label_mega <- all_beta_mega
+  annotation_label_mega$mark <- ifelse(annotation_label_mega$fdr <0.05,"**", "")
+  
+  
+  
+  my_colours = c('blue', 'grey', 'red', 'green', 'yellow', 'purple') 
+    mega_analysis_plot = all_beta_mega %>% 
+    ggplot(aes(x = subclass, y = beta,fill = AIBS_class_color)) + theme_minimal()+
+    geom_hline(yintercept = 0) + 
+    geom_bar(stat = "identity", show.legend = FALSE) + 
+    scale_fill_manual(values = my_colours) + 
+    facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
+    geom_errorbar(aes(ymin = lb, ymax = ub), width = .33) + 
+    ylab('LOAD (Beta)') + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 15),
+         strip.text.x = element_text(size = 15))+
+    ggtitle(paste0("Mega Analysis Results for ", folder_name, " Marker List")) +
+    geom_text(x = annotation_label_mega$subclass,  y = 0.3, 
+              label = annotation_label_mega$mark, 
+              colour = "black", size=6)+
+      scale_fill_brewer(palette="BuPu")
+
+assign(paste0("mega_analysis_plot_", markers), mega_analysis_plot)
+   
+## generate the final multi-panel temporal figure using cowplot's plot_grid
+bottom_plot = plot_grid(SST_final_boxplots_subclass_FINAL, 
+                    IT_final_boxplots_subclass_FINAL,  
+                    nrow = 2, ncol = 1, rel_widths = c(.6, .4), 
+                    axis = 'l', align = 'v', labels = c('B', 'C'))
+full_plot = plot_grid(mega_analysis_plot_subclass_FINAL, 
+                          bottom_plot, nrow = 2 , 
+                          rel_heights = c(1.5,2.5), labels = c('A'))
+setwd('./figures')
+saveRDS(full_plot, "figure1.rds")
+pdf(file = "figure1.pdf", 
+    width = 10, # The width of the plot in inches
+    height = 12)
+print(full_plot)
+dev.off()
+print(full_plot)
+```
+
+Let's recreate this figure but without the SST marker gene in the marker list.
+```{r}
+setwd('./subclassMeta')
+subclass_meta <- read.csv('subclass_meta.txt')
+setwd('../')
+markers <- "subclass_FINAL_common_final_noSST"
+folder_name <- "subclass_FINAL_noSST"
+setwd(paste0('./mgpResults_',folder_name))
+full_res <- readRDS(paste0("full_res_", markers, ".rds"))
+assign(paste0("full_res_", "markers"), full_res)
+full_sig <- readRDS(paste0("full_sig_", markers, ".rds"))
+assign(paste0("full_sig_", markers), full_sig)
+setwd('../')
+
+cohort_name <- c("ROSMAP", "BM10", "BM44", "BM22", "BM36", "MAYO")
+full_res$cohort <- factor(full_res$cohort, levels = cohort_name)
+full_sig$cohort <- factor(full_sig$cohort, levels = cohort_name)
+  
+full_res <- arrange(full_res, cohort)
+full_sig <- arrange(full_sig, cohort)
+
+#add the *** label for significant vs. not significant
+annotation_label <- full_sig
+annotation_label$bonf <- p.adjust(annotation_label$significance, method="bonferroni")
+annotation_label$mark <- ifelse(annotation_label$significance <0.05,"*", "ns")
+
+
+#focus on SST and IT
+cell_types <- c("L2.3.IT", "SST")
+  
+    
+    
+for(cell in cell_types){
+  if(cell == "SST"){
+    mark_height = 3.5
+  }
+  else{
+    mark_height = 2.5
+  }
+  print(cell)
+  label_mark <- subset(annotation_label, celltype == cell)
+  data_text <- data.frame(
+    label = label_mark$mark,
+    cohort   = cohort_name
+  )
+  y_axis <- paste0(cell, "LOADResid")
+  boxplots <- full_res %>% 
+    ggplot(aes(x = Diagnosis, y = get(y_axis))) + theme_minimal()+
+    geom_quasirandom(size=0.6,shape=19,aes(col=Diagnosis),alpha=0.8) +
+    stat_summary(fun=mean,geom="point",aes(fill=Diagnosis),size=4,shape=23,col="black")+
+    scale_fill_brewer(palette="Set1")+
+    scale_color_brewer(palette="Set1")+
+    ggtitle(paste0(cell, ' rCTP residuals association with LOAD for ', markers))+
+    facet_wrap(~cohort, scales = 'free_x',nrow=1) + 
+    ylab(paste0(cell, ' rCTP residuals')) + 
+    xlab('')  + geom_text(
+    data    = data_text,
+    mapping = aes(x = 1, y = mark_height, label = label),
+    hjust   = -0.1,
+    vjust   = -1
+  )
+  assign(paste0(cell, "_final_boxplots_", markers), boxplots)
+  print(boxplots)
+}
+#get mega analysis plot
+ setwd('./megaResults')
+  mega_mgp_results <- readRDS(paste0("mega_results_", markers, ".rds"))
+  assign(paste0("mega_results_", markers), mega_mgp_results)
+  setwd('../')
+  
+  
+  
+  
+  mega_mgp_results <- mega_mgp_results %>% rename(subclass = celltype)
+  subclass_meta$AIBS_subclass_label <- make.names(subclass_meta$AIBS_subclass_label)
+  all_beta_mega = merge(mega_mgp_results,
+                        subclass_meta, by.x = 'subclass', by.y = 'AIBS_subclass_label')
+  all_beta_mega$class <- as.factor(all_beta_mega$AIBS_class_label)
+  all_beta_mega$class <- factor(all_beta_mega$AIBS_class_label,
+                                levels = c("GABAergic", "Glutamatergic", 
+                                           "Non-neuronal"))
+  all_beta_mega <- arrange(all_beta_mega, class)
+  all_beta_mega$ub = all_beta_mega$beta + all_beta_mega$std.err
+  all_beta_mega$lb = all_beta_mega$beta - all_beta_mega$std.err
+  
+  
+  
+  
+  
+  #add the *** label for significant vs. not significant
+  annotation_label_mega <- all_beta_mega
+  annotation_label_mega$mark <- ifelse(annotation_label_mega$fdr <0.05,"**", "")
+  
+  
+  
+  my_colours = c('blue', 'grey', 'red', 'green', 'yellow', 'purple') 
+    mega_analysis_plot = all_beta_mega %>% 
+    ggplot(aes(x = subclass, y = beta,fill = AIBS_class_color)) + theme_minimal()+
+    geom_hline(yintercept = 0) + 
+    geom_bar(stat = "identity", show.legend = FALSE) + 
+    scale_fill_manual(values = my_colours) + 
+    facet_grid(~AIBS_class_label, scale = 'free_x', space = 'free_x') +
+    geom_errorbar(aes(ymin = lb, ymax = ub), width = .33) + 
+    ylab('LOAD (Beta)') + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size = 15),
+         strip.text.x = element_text(size = 15))+
+    ggtitle(paste0("Mega Analysis Results for ", folder_name, " Marker List")) +
+    geom_text(x = annotation_label_mega$subclass,  y = 0.3, 
+              label = annotation_label_mega$mark, 
+              colour = "black", size=6)+
+      scale_fill_brewer(palette="BuPu")
+
+
+assign(paste0("mega_analysis_plot_", markers), mega_analysis_plot)
+   
+## generate the final multi-panel temporal figure using cowplot's plot_grid
+bottom_plot = plot_grid(SST_final_boxplots_subclass_FINAL_common_final_noSST, 
+                    L2.3.IT_final_boxplots_subclass_FINAL_common_final_noSST,  
+                    nrow = 2, ncol = 1, rel_widths = c(.6, .4), 
+                    axis = 'l', align = 'v', labels = c('B', 'C'))
+full_plot = plot_grid(mega_analysis_plot_subclass_FINAL_common_final_noSST, 
+                          bottom_plot, nrow = 2 , 
+                          rel_heights = c(1.5,2.5), labels = c('A'))
+setwd('./figures')
+saveRDS(full_plot, "figure1-noSST.rds")
+pdf(file = "figure1-noSST.pdf", 
+    width = 10, # The width of the plot in inches
+    height = 12)
+print(full_plot)
+dev.off()
+print(full_plot)
+```

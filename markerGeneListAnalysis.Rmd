@@ -30,6 +30,8 @@ Let's load the newest marker gene set information, rank them by logFC and put th
 setwd('./markerGeneEfficacy')
 markers_df <-  read.csv(file = 'final_subclass_markers.txt', stringsAsFactors = F)
 setwd('../')
+cut_off <- mean(markers_df$avg_log2FC)
+markers_df <- markers_df %>% filter(avg_log2FC >= cut_off)
 markers_df$rank <- markers_df$bretigea_ranking_best
 markers_df <- markers_df[!duplicated(markers_df$gene), ]
 
@@ -54,6 +56,9 @@ names(final_list) <- make.names(unique(markers_df$value))
 
 setwd('./markerGeneEfficacy')
 saveRDS(final_list, "broad_markers_list_BRETIGEA.rds")
+setwd('../')
+setwd('./markerLists')
+saveRDS(final_list, "subclass_FINAL.rds")
 setwd('../')
 
 ```
@@ -86,7 +91,7 @@ for(cohort in cohorts){
   final_df$new_gene <- new_gene
   n_col <- ncol(count_df)
   mgp_df <- final_df[,c(n_col+2,2:n_col)]
-  count_df <- mgp_df %>% rename(Gene = new_gene)
+  count_df <- mgp_df %>% dplyr::rename(Gene = new_gene)
   df_name <- paste0(cohort, "_count_df")
   assign(df_name, count_df)
 }
@@ -845,4 +850,37 @@ for (markers in marker_lists){
     
   }
 }
+```
+
+```{r}
+run_type <- "_ALL"
+setwd('./markerGeneEfficacy')
+all_cohort_PV <- readRDS(paste0("all_cohort_PV", run_type, ".rds"))
+setwd('../')
+
+#don't want just lowest number of markers explains variance, so take more than 5 
+#all_cohort_PV <- all_cohort_PV %>% filter(markers_used > 5)
+
+
+setwd('./markerGeneEfficacy')
+broad_markers_list_BRETIGEA_ALL_common_final <-
+  readRDS("broad_markers_list_BRETIGEA_ALL_common_final.rds")
+setwd('../')
+
+cell_type_names <- names(broad_markers_list_BRETIGEA_ALL_common_final)
+for(cell in cell_type_names){
+  print(cell)
+  cell_specific_PV <- all_cohort_PV %>% filter(celltype == cell)
+  cell_cap_val <- cell_specific_PV %>% 
+    filter(percent_variance == max(cell_specific_PV$percent_variance))
+  cell_cap_val <- cell_cap_val$markers_used
+  if(cell == cell_type_names[1]){
+    cell_cap <- data.frame("marker.num" = cell_cap_val, "celltype"=cell)
+  }
+  else{
+    curr_cap <- data.frame("marker.num" = cell_cap_val, "celltype"=cell)
+    cell_cap <- rbind(cell_cap, curr_cap)
+  }
+}
+
 ```

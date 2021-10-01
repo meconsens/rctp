@@ -18,6 +18,8 @@ library(stringr)
 library(markerGeneProfile)
 library(rlist)
 library(kableExtra)
+library(magick)
+library(webshot)
 ```
 
 Now that we've loaded in the necessary libraries we can set up the marker gene lists to run the MGP algorithm. These marker gene lists will be used to describe each of the cell types in the relative cell-type proportions (rCTPs) we are calculating for each cohort. 
@@ -213,6 +215,7 @@ commonMarkerList <-function(markers, cohort_num){
     return(final_common_markers)
   
 }
+
 marker_lists <- c("subclass_CgG_MTG", "lake", "darmanis")
 for(markers in marker_lists){
     final_common_markers <- list()
@@ -225,6 +228,13 @@ for(markers in marker_lists){
     assign(paste0(markers, "_common_final"), final_common_markers)
     saveRDS(final_common_markers, paste0('./commonMarkerLists/',markers, "_common_final.rds"))
 }
+
+#let's make a list such that there's a subclass_CgG_MTG_common_final that's identical, save for the SST cell type being defined without the SST gene
+subclass_CgG_MTG_noSST_common_final <-subclass_CgG_MTG_common_final
+subclass_CgG_MTG_noSST_common_final$SST <- subclass_CgG_MTG_noSST_common_final$SST[-2]
+saveRDS(subclass_CgG_MTG_noSST_common_final,
+        paste0('./commonMarkerLists/subclass_CgG_MTG_noSST_common_final.rds'))
+
 ```
 Now that we've got the common list among the relevant cohorts, let's plot.
 ```{r echo=FALSE, cache=FALSE, comment=FALSE, warning=FALSE}
@@ -321,7 +331,7 @@ mgpsForAMPAD<-function(cohort, markers){
 }
 
 cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
-marker_lists <- c("subclass_CgG_MTG_common_final", "lake", "darmanis")
+marker_lists <- c("subclass_CgG_MTG_common_final", "lake", "darmanis", "subclass_CgG_MTG_noSST_common_final")
 for(markers in marker_lists){
   print(markers)
   for(cohort in cohorts){
@@ -337,7 +347,7 @@ for(markers in marker_lists){
 Now we've calculated MGPs for each of the cohorts and each of the common marker gene lists. We want to Z-score these MGPs so we can compare them in a mega-analysis within each marker gene list.
 ```{r}
 cohorts <- c("ROSMAP", "MAYO", "BM10", "BM22", "BM36", "BM44")
-marker_lists <- c("subclass_CgG_MTG_common_final", "lake", "darmanis")
+marker_lists <- c("subclass_CgG_MTG_common_final", "lake", "darmanis", "subclass_CgG_MTG_noSST_common_final")
 #Z score mgps per subject
 for(markers in marker_lists){
   folder_name <- gsub('_common_final', '', markers)
@@ -439,7 +449,15 @@ for(markers in marker_lists){
   all_cohorts_QC$cohort <- factor(all_cohorts_QC$cohort, levels = c("ROSMAP", "BM10", "BM44", "BM22", "BM36", "MAYO"))
   all_cohorts_QC <- arrange(all_cohorts_QC, cohort)
   if(markers == "subclass_CgG_MTG_common_final"){
-    print(kable(data.frame("celltype" = all_cohorts_QC$celltype, "PC1 variance" = all_cohorts_QC$percent_variance_PC1, "cohort" = all_cohorts_QC$cohort), align = "lccrr"))
+    PCvar_table <- kable(data.frame("celltype" = all_cohorts_QC$celltype, 
+                                    "PC1 variance" = all_cohorts_QC$percent_variance_PC1,
+                                    "cohort" = all_cohorts_QC$cohort), align = "lccrr")
+
+    (PCvar_table %>% kable_styling(latex_options = c("striped", "scale_down")) %>%
+            row_spec(c(9, 17, 28, 36, 47, 55, 66, 74, 85, 93, 104, 112), color = "red") %>%
+            cat(., file = paste0('./mgpQC_',folder_name, "/percent_variance.html")))
+    
+  
   }
   saveRDS(all_cohorts_QC, paste0('./mgpQC_',folder_name, "/all_cohorts_QC_common.rds"))
 }

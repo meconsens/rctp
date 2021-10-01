@@ -18,3 +18,6 @@
 "17","Endothelial","Endothelial","#7F00FF","Non-neuronal","#17994B"
 "18","Exc_L4 IT","L4 IT","#63992E","Glutamatergic","#AFCC3D"
 "19","VLMC","VLMC","#B65CCC","Non-neuronal","#17994B"
+"20","Exc_L2/3 IT","L2/3 IT","#b4e386","Glutamatergic","#AFCC3D"
+"21","Exc_L3/5 IT","L3/5 IT","#2c4a0f","Glutamatergic","#AFCC3D"
+"22","Exc_L6 IT","L6 IT","#1c3604","Glutamatergic","#AFCC3D"
